@@ -1,0 +1,71 @@
+[project]
+name = "carla2cosmos"
+version = "0.1.0"
+description = "[TODO]"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "attrs==25.3.0",
+    "carla==0.9.15",
+    "click==8.2.1",
+    "decord==0.6.0",
+    "einops==0.8.1",
+    "imageio[ffmpeg]==2.37.0",
+    "numpy==2.2.6",
+    "opencv-python-headless==4.11.0.86",
+    "pymap3d==3.1.0",
+    "pyproj==3.7.1",
+    "python-pycg==0.10.2",
+    "ray[default]==2.46.0",
+    "scipy==1.15.3",
+    "shapely==2.1.1",
+    "termcolor==3.1.0",
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+    "tqdm==4.67.1",
+    "transformers==4.52.4",
+    "trimesh==4.6.10",
+    "tyro==0.9.24",
+    "viser==0.2.23",
+    "webdataset==0.2.111",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "ruff>=0.11.12",
+]
+
+[tool.ruff]
+exclude = [
+    ".venv",
+    "data",
+    ".vscode",
+    ".ipynb_checkpoints",
+    "notebook",
+    "outputs",
+    ".typings",
+]
+line-length = 110
+indent-width = 4
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = ["E501"]
+unfixable = ["B"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

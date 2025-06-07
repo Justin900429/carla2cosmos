@@ -12,7 +12,7 @@ import numpy as np
 from tqdm import tqdm
 import tyro
 from manager import CarlaManager
-
+import attrs
 from misc.custom_logger import setup_logging
 from config.stream_config import StreamConfig
 
@@ -239,6 +239,13 @@ def record_clip(
 
 
 def main(config: StreamConfig):
+    # automatically assign clip_id if not provided
+    if config.clip_id is None:
+        list_of_clips = list(config.out_dir.glob("clip_*"))
+        if len(list_of_clips) == 0:
+            config.clip_id = 0
+        else:
+            config.clip_id = max([int(clip.name.split("_", 1)[1]) for clip in list_of_clips]) + 1
     global logger
     target_out_dir = config.out_dir / f"clip_{config.clip_id:04d}"
     target_out_dir.mkdir(parents=True, exist_ok=True)
@@ -253,6 +260,10 @@ def main(config: StreamConfig):
             fps=config.fps,
         ) as carla_manager:
             record_clip(carla_manager, target_out_dir, config)
+
+        # dump the config file
+        with open(target_out_dir / "config.json", "w") as fp:
+            json.dump(attrs.asdict(config), fp, indent=2)
 
         if config.make_video:
             build_mp4(

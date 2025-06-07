@@ -31,7 +31,7 @@ class EgoConfig:
 class StreamConfig:
     # —— output
     out_dir: pathlib.Path = field(default=pathlib.Path("./data"))
-    clip_id: int = field(default=0)
+    clip_id: int | None = field(default=None)
     make_video: bool = field(default=False)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = field(default="INFO")
 

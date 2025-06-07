@@ -16,7 +16,7 @@ from utils.wds_utils import write_to_tar, encode_dict_to_npz_bytes
 
 def convert_carla_intrinsics(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
 ):
     """
@@ -26,7 +26,7 @@ def convert_carla_intrinsics(
     ----------
     root_dir : Path
         Folder that already contains `calibration/`.
-    output_root : Path
+    out_dir : Path
         Root where the `pinhole_intrinsic/<clip_id>.tar` should be created.
     clip_id : str
     """
@@ -48,12 +48,12 @@ def convert_carla_intrinsics(
         dtype=np.float32,
     )
 
-    write_to_tar(sample, output_root / "pinhole_intrinsic" / f"{clip_id}.tar")
+    write_to_tar(sample, out_dir / "pinhole_intrinsic" / f"{clip_id}.tar")
 
 
 def convert_carla_hdmap(
     record_root: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     sample_step: float = 2.0,  # [m] along-track resolution
 ):
@@ -74,7 +74,7 @@ def convert_carla_hdmap(
     ----------
     record_root : Path
         Folder that already contains `hdmap/` and `calibration/`.
-    output_root : Path
+    out_dir : Path
         Root where the `3d_lanes/<clip_id>.tar`, `3d_lanelines/<clip_id>.tar`, `3d_road_boundaries/<clip_id>.tar`, and `3d_crosswalks/<clip_id>.tar` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
@@ -224,12 +224,12 @@ def convert_carla_hdmap(
             "__key__": clip_id,
             f"{layer_name}.json": {"labels": labels},
         }
-        write_to_tar(sample, output_root / f"3d_{layer_name}" / f"{clip_id}.tar")
+        write_to_tar(sample, out_dir / f"3d_{layer_name}" / f"{clip_id}.tar")
 
 
 def convert_carla_pose(
     record_root: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     index_scale_ratio: int = 1,  # CARLA is already 30 Hz → keep 1
 ):
@@ -247,7 +247,7 @@ def convert_carla_pose(
     ----------
     record_root : Path
         Folder that already contains `ego_pose/` and `calibration/`.
-    output_root : Path
+    out_dir : Path
         Root where the `pose/<clip_id>.tar` and `vehicle_pose/<clip_id>.tar` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
@@ -297,13 +297,13 @@ def convert_carla_pose(
             )
             cam_sample[f"{frame_idx:06d}.pose.{cam_name}.npy"] = cam_to_world_cv
 
-    write_to_tar(cam_sample, output_root / "pose" / f"{clip_id}.tar")
-    write_to_tar(veh_sample, output_root / "vehicle_pose" / f"{clip_id}.tar")
+    write_to_tar(cam_sample, out_dir / "pose" / f"{clip_id}.tar")
+    write_to_tar(veh_sample, out_dir / "vehicle_pose" / f"{clip_id}.tar")
 
 
 def convert_carla_timestamp(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     index_scale_ratio: int = 1,
 ) -> None:
@@ -315,7 +315,7 @@ def convert_carla_timestamp(
     ----------
     record_root : Path
         Folder that already contains `timestamp.json`.
-    output_root : Path
+    out_dir : Path
         Root where the `timestamp/<clip_id>.tar` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
@@ -335,12 +335,12 @@ def convert_carla_timestamp(
         fname = f"{idx * index_scale_ratio:06d}.timestamp_micros.txt"
         sample[fname] = str(t_sec)
 
-    write_to_tar(sample, output_root / "timestamp" / f"{clip_id}.tar")
+    write_to_tar(sample, out_dir / "timestamp" / f"{clip_id}.tar")
 
 
 def convert_carla_bbox(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     fps: int = 30,
     min_moving_speed: float = 0.2,
@@ -365,7 +365,7 @@ def convert_carla_bbox(
     ----------
     root_dir : Path
         Folder that already contains `labels_3d/` and `timestamp.json`.
-    output_root : Path
+    out_dir : Path
         Root where the `all_object_info/<clip_id>.tar` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
@@ -426,12 +426,12 @@ def convert_carla_bbox(
                 "object_type": obj["class"],
             }
 
-    write_to_tar(sample, output_root / "all_object_info" / f"{clip_id}.tar")
+    write_to_tar(sample, out_dir / "all_object_info" / f"{clip_id}.tar")
 
 
 def convert_carla_lidar(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     index_scale_ratio: int = 1,  # keep 1 – we already record at 30 Hz
 ):
@@ -454,7 +454,7 @@ def convert_carla_lidar(
     ----------
     root_dir : Path
         Folder that already contains `lidar/` and `ego_pose/`.
-    output_root : Path
+    out_dir : Path
         Root where the `lidar_raw/<clip_id>.tar` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
@@ -485,12 +485,12 @@ def convert_carla_lidar(
         frame_key = f"{idx * index_scale_ratio:06d}.lidar_raw.npz"
         sample[frame_key] = encode_dict_to_npz_bytes({"xyz": pts, "lidar_to_world": lidar_to_world})
 
-    write_to_tar(sample, output_root / "lidar_raw" / f"{clip_id}.tar")
+    write_to_tar(sample, out_dir / "lidar_raw" / f"{clip_id}.tar")
 
 
 def convert_carla_image(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     fps: int = 30,
     single_camera: bool = False,
@@ -506,13 +506,13 @@ def convert_carla_image(
             …
 
     Output:
-        <output_root>/pinhole_<name>/<clip_id>.mp4
+        <out_dir>/pinhole_<name>/<clip_id>.mp4
 
     Parameters
     ----------
     root_dir : Path
         Folder that already contains `camera_front/` and `camera_left/`.
-    output_root : Path
+    out_dir : Path
         Root where the `pinhole_<name>/<clip_id>.mp4` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
@@ -536,7 +536,7 @@ def convert_carla_image(
         if not frame_paths:
             continue
 
-        out_mp4 = output_root / f"pinhole_{cam_name}" / f"{clip_id}.mp4"
+        out_mp4 = out_dir / f"pinhole_{cam_name}" / f"{clip_id}.mp4"
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
 
         # ---------------------------------------------------------------------
@@ -554,7 +554,7 @@ def convert_carla_image(
 
 def convert_carla_to_wds(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     clip_id: str,
     single_camera: bool = False,
 ):
@@ -567,18 +567,18 @@ def convert_carla_to_wds(
         print(f"Skipping {clip_id} because it already exists")
         return
 
-    convert_carla_intrinsics(root_dir, output_root, clip_id)
-    convert_carla_hdmap(root_dir, output_root, clip_id)
-    convert_carla_pose(root_dir, output_root, clip_id)
-    convert_carla_timestamp(root_dir, output_root, clip_id)
-    convert_carla_bbox(root_dir, output_root, clip_id)
-    convert_carla_lidar(root_dir, output_root, clip_id)
-    convert_carla_image(root_dir, output_root, clip_id, single_camera=single_camera)
+    convert_carla_intrinsics(root_dir, out_dir, clip_id)
+    convert_carla_hdmap(root_dir, out_dir, clip_id)
+    convert_carla_pose(root_dir, out_dir, clip_id)
+    convert_carla_timestamp(root_dir, out_dir, clip_id)
+    convert_carla_bbox(root_dir, out_dir, clip_id)
+    convert_carla_lidar(root_dir, out_dir, clip_id)
+    convert_carla_image(root_dir, out_dir, clip_id, single_camera=single_camera)
 
 
 def main(
     root_dir: Path,
-    output_root: Path,
+    out_dir: Path,
     num_workers: int = 1,
     single_camera: bool = False,
 ):
@@ -590,7 +590,7 @@ def main(
             executor.submit(
                 convert_carla_to_wds,
                 root_dir=root_dir,
-                output_root=output_root,
+                out_dir=out_dir,
                 clip_id=str(int(os.path.basename(clip_id).split("_")[1])),
                 single_camera=single_camera,
             )

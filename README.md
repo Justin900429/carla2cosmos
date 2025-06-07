@@ -6,10 +6,15 @@ Stream and record synchronous CARLA sessions at **30 Hz**, saving only the ess
 
 ```bash
 python stream_carla.py \
+  --town {TOWN_NAME} \
+  --num_frames {NUM_FRAMES} \
+  --out_dir {DIR_FOR_SAVING_DATA}
+
+# for example
+python stream_carla.py \
   --town Town04 \
   --num_frames 600 \
   --out_dir ./data \
-  --clip_id 1
 ```
 
 This will create a 600-frame clip inside `./data/clip_001`. Each recording is saved under:
@@ -31,3 +36,78 @@ Note that:
 
 * only **three blobs are written per frame** — the rest are static across the clip.
 * All coordinates follow the **right-handed ENU** convention (like Waymo & RDS-HQ).
+
+>[!TIP]
+> Run `python stream_carla.py --help` to see all available configuration options, including sensor settings, simulation parameters, and output preferences.
+
+## 🗃️ Converting to RDS-HQ
+
+To convert the recorded data to the RDS-HQ format, run the `convert_to_rds_hq.py` script:
+
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+
+python toolkit/convert_carla_to_rds_hq.py \
+  --root-dir {DIR_WITH_RECORDING_CLIPS} \
+  --out-dir {DIR_FOR_SAVING_DATA}
+
+# for example
+python toolkit/convert_carla_to_rds_hq.py \
+  --root-dir data \
+  --out-dir outputs
+```
+
+This will create a directory with the following structure:
+
+```plaintext
+<out_dir>/
+├── pinhole_front/        # Contains video files (.mp4)
+├── pinhole_intrinsic/    # Contains camera intrinsic parameters
+├── lidar_raw/            # Contains LiDAR data archives (.tar)
+├── all_object_info/      # Contains object information data
+├── timestamp/            # Contains timestamp data
+├── vehicle_pose/         # Contains vehicle pose data
+├── pose/                 # Contains pose data
+├── 3d_road_boundaries/   # Contains 3D road boundary data
+├── 3d_lanelines/         # Contains 3D lane line data
+└── 3d_lanes/             # Contains 3D lane data
+```
+
+## 🎥 Rendering from RDS-HQ
+
+>[!TIP]
+> The rendering functionality is based on the [cosmos-av-sample-toolkits](https://github.com/nv-tlabs/cosmos-av-sample-toolkits) repository. You can refer to their documentation for more details about the rendering process and options.
+
+To render the HD-Map and Lidar from the RDS-HQ format, run the `render_rds_hq.py` script:
+
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+
+python toolkit/render_rds_hq.py \
+  -d waymo \
+  -i {DIR_WITH_RDS_HQ_DATA} \
+  -o {DIR_FOR_SAVING_RENDERED_DATA} \
+  -c pinhole
+
+# for example
+python toolkit/render_rds_hq.py \
+  -d waymo -i outputs \
+  -o demo_render -c pinhole
+```
+
+This will create a directory with the following structure:
+
+```plaintext
+<render_dir>/
+demo_render/
+├── lidar/
+│   └── pinhole_front/    # Contains LiDAR visualization data
+└── hdmap/
+    └── pinhole_front/    # Contains HD map visualization data
+```
+
+For multi-camera setups, rendered data is organized in the `lidar` and
+`hdmap` directories with the naming convention `pinhole_<camera_name>`.
+
+>[!Note]
+> The current version only supports rendering from the front camera.

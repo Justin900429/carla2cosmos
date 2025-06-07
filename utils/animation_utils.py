@@ -290,9 +290,12 @@ class BezierInterpolator(BaseInterpolator):
 
         from scipy.optimize import fsolve
 
-        f = lambda x: o3t[0] * x**3 + o2t[0] * x**2 + o1t[0] * x + o0t[0]
-        fy = lambda x: o3t[1] * x**3 + o2t[1] * x**2 + o1t[1] * x + o0t[1] + t
-        fprime = lambda x: 3 * o3t[0] * x**2 + 2 * o2t[0] * x + o1t[0]
+        def f(x):
+            return o3t[0] * x**3 + o2t[0] * x**2 + o1t[0] * x + o0t[0]
+        def fy(x):
+            return o3t[1] * x**3 + o2t[1] * x**2 + o1t[1] * x + o0t[1] + t
+        def fprime(x):
+            return 3 * o3t[0] * x**2 + 2 * o2t[0] * x + o1t[0]
         t_target = fsolve(f, [0.5], fprime=fprime)[0]
 
         return fy(t_target)

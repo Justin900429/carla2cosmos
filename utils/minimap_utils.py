@@ -112,7 +112,6 @@ def simplify_minimap(minimap_wds_file):
 
     # 8 vertices, we can also make it polyline, just repeat some edges!
     if get_type_from_name(minimap_name) == "cuboid3d":
-        connected_vertices_indices = [0, 1, 2, 3, 0, 4, 5, 6, 7, 4, 5, 1, 2, 6, 7, 3]
         for i, eight_vertices in enumerate(minimap_data_wo_meta_info):
             connected_polyline = cuboid3d_to_polyline(eight_vertices)
             minimap_data_wo_meta_info[i] = connected_polyline

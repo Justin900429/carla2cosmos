@@ -917,8 +917,8 @@ def project_points_sparse_batch(
         # For fθ cameras, intrinsic is (N, 11) in the format:
         # [cx, cy, width, height, poly_coeffs..., is_bw_poly]
         # First, compute common geometric quantities.
-        cx = intrinsic[:, 0]  # (N,)
-        cy = intrinsic[:, 1]  # (N,)
+        intrinsic[:, 0]  # (N,)
+        intrinsic[:, 1]  # (N,)
         x_cam = cam_coords[:, 0]
         y_cam = cam_coords[:, 1]
         z_cam = cam_coords[:, 2]

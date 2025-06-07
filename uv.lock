@@ -246,6 +246,7 @@ dependencies = [
     { name = "click" },
     { name = "decord" },
     { name = "einops" },
+    { name = "eulerspiral" },
     { name = "imageio", extra = ["ffmpeg"] },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -274,11 +275,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "attrs", specifier = ">=25.3.0" },
+    { name = "attrs", specifier = "==25.3.0" },
     { name = "carla", specifier = "==0.9.15" },
     { name = "click", specifier = "==8.2.1" },
     { name = "decord", specifier = "==0.6.0" },
     { name = "einops", specifier = "==0.8.1" },
+    { name = "eulerspiral", git = "https://github.com/stefan-urban/pyeulerspiral.git" },
     { name = "imageio", extras = ["ffmpeg"], specifier = "==2.37.0" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "opencv-python-headless", specifier = "==4.11.0.86" },
@@ -294,7 +296,7 @@ requires-dist = [
     { name = "tqdm", specifier = "==4.67.1" },
     { name = "transformers", specifier = "==4.52.4" },
     { name = "trimesh", specifier = "==4.6.10" },
-    { name = "tyro", specifier = ">=0.9.24" },
+    { name = "tyro", specifier = "==0.9.24" },
     { name = "viser", specifier = "==0.2.23" },
     { name = "webdataset", specifier = "==0.2.111" },
 ]
@@ -676,6 +678,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/d7/11e00e53ef9fb475ee80a9327af61a491d9f4ec10356be4a23dd6ff4ee47/embreex-2.17.7.post6-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:845dcee445e9be19d52a0c0672a36d4b3180b6e71ae33644545df34aaaf37894", size = 17194628 },
     { url = "https://files.pythonhosted.org/packages/d5/40/7d8cf531bdff6acefe9cecf638ea6a2ccc3222cacde50902d692354be801/embreex-2.17.7.post6-cp313-cp313-win_amd64.whl", hash = "sha256:c3690a0e590f8ee60076e083fbc191567f7f21996e08d544622fdf15b015a0c1", size = 13465435 },
 ]
+
+[[package]]
+name = "eulerspiral"
+version = "1.0"
+source = { git = "https://github.com/stefan-urban/pyeulerspiral.git#f7485b3575274a246872c46131846ae9882db7ce" }
 
 [[package]]
 name = "exceptiongroup"

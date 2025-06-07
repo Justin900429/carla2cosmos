@@ -1,7 +1,5 @@
 import json
-import math
 import os
-import xml.etree.ElementTree as ET
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -11,6 +9,7 @@ import imageio
 from tqdm import tqdm
 import tyro
 
+from utils.opendriver_parser import load_xodr_and_parse, get_all_lanes
 from utils.wds_utils import write_to_tar, encode_dict_to_npz_bytes
 
 
@@ -55,7 +54,7 @@ def convert_carla_hdmap(
     record_root: Path,
     out_dir: Path,
     clip_id: str,
-    sample_step: float = 2.0,  # [m] along-track resolution
+    sample_step: float = 1.0,  # finer sampling = better fidelity
 ):
     """
     Parse the OpenDRIVE (*.xodr) map saved by *record_clip()* and emit four
@@ -82,149 +81,93 @@ def convert_carla_hdmap(
         Sample step along the reference line (in meters).
     """
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Small helpers
-    # ──────────────────────────────────────────────────────────────────────────
-    def _line_points(x0, y0, hdg, length, ds=sample_step):
-        """Return polyline samples for <line> geometry."""
-        n = max(2, int(math.ceil(length / ds)))
-        return [[x0 + s * math.cos(hdg), y0 + s * math.sin(hdg), 0.0] for s in np.linspace(0.0, length, n)]
+    xodr_file = record_root / "hdmap" / "static_map.xodr"
+    road_network = load_xodr_and_parse(xodr_file)
+    total_areas = get_all_lanes(road_network, step=sample_step)
 
-    def _arc_points(x0, y0, hdg, length, radius, ds=sample_step):
-        """Polyline for a constant-radius <arc>."""
-        n = max(2, int(math.ceil(length / ds)))
-        sign = 1.0 if radius > 0 else -1.0
-        r = abs(radius)
-        pts = []
-        for s in np.linspace(0.0, length, n):
-            theta = s / r
-            x = x0 + r * (math.sin(theta + hdg) - math.sin(hdg)) * sign
-            y = y0 + r * (-math.cos(theta + hdg) + math.cos(hdg)) * sign
-            pts.append([x, y, 0.0])
-        return pts
+    ALLOW_TYPES = ["driving", "shoulder"]
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 1. Parse the OpenDRIVE XML
-    # ──────────────────────────────────────────────────────────────────────────
-    xodr_path = record_root / "hdmap" / "static_map.xodr"
-    tree = ET.parse(xodr_path)
-    root = tree.getroot()
+    boundaries_sample = {"__key__": clip_id, "road_boundaries.json": {"labels": []}}
+    lanes_sample = {"__key__": clip_id, "lanes.json": {"labels": []}}
+    lanelines_sample = {"__key__": clip_id, "lanelines.json": {"labels": []}}
 
-    lanes_poly = []  # centre-lines
-    lanelines_poly = []  # lane borders
-    roadedge_poly = []  # outer edges
-    crosswalk_poly = []  # surface polygons
-
-    for road in root.findall("road"):
-        # a) sample the reference line (planView) – treat as lane centre
-        plan = road.find("planView")
-        if plan is None:
+    for layer_data in total_areas.values():
+        # Check whether the layer has reference points as the middle lane
+        reference_points = layer_data["reference_points"]
+        if not reference_points:
             continue
-        for geom in plan.findall("geometry"):
-            s0 = float(geom.get("s"))
-            x0 = float(geom.get("x"))
-            y0 = float(geom.get("y"))
-            hdg = float(geom.get("hdg"))
-            L = float(geom.get("length"))
-            if geom.find("line") is not None:
-                pts = _line_points(x0, y0, hdg, L)
-            elif (arc := geom.find("arc")) is not None:
-                curvature = float(arc.get("curvature"))
-                R = 1.0 / curvature
-                pts = _arc_points(x0, y0, hdg, L, R)
-            else:
-                # spiral / poly3 not handled – skip
-                continue
-            lanes_poly.append(pts)
 
-        # b) lane borders and road edges
-        for lane_sec in road.findall("lanes/laneSection"):
-            t_off = 0.0  # cumulative lateral offset from reference
-            # iterate left side & right side separately
-            for side_tag in ("left", "right"):
-                side = lane_sec.find(side_tag)
-                if side is None:
-                    continue
-                # sort by absolute lane id (1,2,3…)
-                for lane in sorted(side.findall("lane"), key=lambda l: abs(int(l.get("id")))):
-                    wid_elems = lane.findall("width")
-                    if not wid_elems:
-                        continue
-                    widths = []
-                    for w in wid_elems:
-                        a, b, c, d = (float(w.get(k)) for k in ("a", "b", "c", "d"))
-                        s_off = float(w.get("sOffset"))
-                        lengths = float(w.get("length", "0"))
-                        # sample start & end, assume linear
-                        widths.append((s_off, a))
-                        widths.append((s_off + lengths, a))
-                    # trace along reference line again to get border polyline
-                    border = []
-                    acc_len = 0.0
-                    for geom in plan.findall("geometry"):
-                        x0 = float(geom.get("x"))
-                        y0 = float(geom.get("y"))
-                        hdg = float(geom.get("hdg"))
-                        L = float(geom.get("length"))
-                        seg_pts = _line_points(x0, y0, hdg, L, ds=sample_step)
-                        for p in seg_pts:
-                            # shift laterally by cumulative lane width
-                            shift = t_off + widths[0][1]
-                            p_shift = [
-                                p[0] - shift * math.sin(hdg),
-                                p[1] + shift * math.cos(hdg),
-                                0.0,
-                            ]
-                            border.append(p_shift)
-                            acc_len += sample_step
-                    t_off += widths[0][1]
-                    lanelines_poly.append(border)
-            # after finishing side loop, `t_off` holds outer edge
-            roadedge_poly.append(border)
+        types = layer_data["types"]
 
-        # c) cross-walk objects
-        for obj in road.findall("objects/object"):
-            if obj.get("type") != "crosswalk":
+        # 1. boundaries --------------------------------
+        # 2. lanelines ---------------------------------
+        left_lanes_areas = layer_data["left_lanes_area"]
+        right_lanes_area = layer_data["right_lanes_area"]
+
+        for left_lane_id, left_lane_area in left_lanes_areas.items():
+            type_of_lane = types[left_lane_id]
+            if type_of_lane not in ALLOW_TYPES:
                 continue
-            outline = obj.find("outline")
-            if outline is None:
-                continue
-            pts = []
-            for corner in outline.findall("cornerLocal"):
-                pts.append(
-                    [
-                        float(corner.get("u")),  # already ENU in XODR for CARLA maps
-                        float(corner.get("v")),
-                        0.0,
-                    ]
+            inner_points = left_lane_area["inner"]
+
+            if type_of_lane == "shoulder":  # inner as the driving lane boundary
+                boundary_points = [(float(x), float(y), 0) for x, y in inner_points]
+                boundaries_sample["road_boundaries.json"]["labels"].append(
+                    {
+                        "labelData": {
+                            "shape3d": {"polyline3d": {"vertices": boundary_points}},
+                        }
+                    }
                 )
-            if pts:
-                crosswalk_poly.append(pts)
+            else:
+                laneline_points = [(float(x), float(y), 0) for x, y in inner_points]
+                lanelines_sample["lanelines.json"]["labels"].append(
+                    {
+                        "labelData": {
+                            "shape3d": {"polyline3d": {"vertices": laneline_points}},
+                        }
+                    }
+                )
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 2. Wrap into Cosmos-style JSONs
-    # ──────────────────────────────────────────────────────────────────────────
-    def _poly_to_labels(polys, vertex_key):
-        return [{"labelData": {"shape3d": {vertex_key: {"vertices": poly}}}} for poly in polys]
+        for right_lane_id, right_lane_area in right_lanes_area.items():
+            type_of_lane = types[right_lane_id]
+            if type_of_lane not in ALLOW_TYPES:
+                continue
+            inner_points = right_lane_area["inner"]
 
-    layer_to_payload = {
-        "lanes": _poly_to_labels(lanes_poly, "polyline3d"),
-        "lanelines": _poly_to_labels(lanelines_poly, "polyline3d"),
-        "road_boundaries": _poly_to_labels(roadedge_poly, "polyline3d"),
-        "crosswalks": _poly_to_labels(crosswalk_poly, "surface"),
-    }
+            if type_of_lane == "shoulder":  # inner as the driving lane boundary
+                boundary_points = [(float(x), float(y), 0) for x, y in inner_points]
+                boundaries_sample["road_boundaries.json"]["labels"].append(
+                    {
+                        "labelData": {
+                            "shape3d": {"polyline3d": {"vertices": boundary_points}},
+                        }
+                    }
+                )
+            else:
+                laneline_points = [(float(x), float(y), 0) for x, y in inner_points]
+                lanelines_sample["lanelines.json"]["labels"].append(
+                    {
+                        "labelData": {
+                            "shape3d": {"polyline3d": {"vertices": laneline_points}},
+                        }
+                    }
+                )
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 3. Dump each layer into its own tar
-    # ──────────────────────────────────────────────────────────────────────────
-    for layer_name, labels in layer_to_payload.items():
-        if not labels:
-            continue
-        sample = {
-            "__key__": clip_id,
-            f"{layer_name}.json": {"labels": labels},
-        }
-        write_to_tar(sample, out_dir / f"3d_{layer_name}" / f"{clip_id}.tar")
+        # 3. lanes ---------------------------------------------------
+        position_center_lane = reference_points["position_center_lane"]
+        position_center_lane = [[float(x), float(y), 0] for x, y in position_center_lane]
+        lanes_sample["lanes.json"]["labels"].append(
+            {
+                "labelData": {
+                    "shape3d": {"polyline3d": {"vertices": position_center_lane}},
+                }
+            }
+        )
+
+    write_to_tar(boundaries_sample, out_dir / "3d_road_boundaries" / f"{clip_id}.tar")
+    write_to_tar(lanes_sample, out_dir / "3d_lanes" / f"{clip_id}.tar")
+    write_to_tar(lanelines_sample, out_dir / "3d_lanelines" / f"{clip_id}.tar")
 
 
 def convert_carla_pose(

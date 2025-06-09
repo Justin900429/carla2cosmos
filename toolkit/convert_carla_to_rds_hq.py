@@ -8,6 +8,8 @@ import imageio.v3 as iio
 import imageio
 from tqdm import tqdm
 import tyro
+from termcolor import cprint
+import open3d as o3d
 
 from utils.opendriver_parser import load_xodr_and_parse, get_all_lanes
 from utils.wds_utils import write_to_tar, encode_dict_to_npz_bytes
@@ -210,7 +212,7 @@ def convert_carla_pose(
             cam_to_vehicle[cam_name] = np.asarray(json.load(fp)["extrinsic"], dtype=np.float32)
 
     # ──────────────────────────────────────────────────────────────────────
-    # prepare WebDataset samples
+    # prepare samples
     # ──────────────────────────────────────────────────────────────────────
     cam_sample = {"__key__": clip_id}
     veh_sample = {"__key__": clip_id}
@@ -379,8 +381,7 @@ def convert_carla_lidar(
     index_scale_ratio: int = 1,  # keep 1 – we already record at 30 Hz
 ):
     """
-    Pack CARLA LiDAR frames into a WebDataset tar so that each entry looks like
-    the output produced by `convert_waymo_lidar()`.
+    Pack CARLA LiDAR frames into a tar.
 
     Source layout (created by *record_clip*):
         root_dir/
@@ -407,7 +408,7 @@ def convert_carla_lidar(
         • Our CARLA recorder is already 30 Hz, so **leave this as 1**.
     """
     # ---------------------------------------------------- load static extrinsic
-    lidar_extrinsic = np.asarray(
+    lidar_to_ego = np.asarray(
         json.loads((root_dir / "calibration" / "lidar.json").read_text())["extrinsic"],
         dtype=np.float32,
     )  # ego ← lidar  (4×4)
@@ -415,18 +416,19 @@ def convert_carla_lidar(
     # ---------------------------------------------------- helper for .npz bytes
     sample = {"__key__": clip_id}
 
-    lidar_files = sorted((root_dir / "lidar").glob("*.npz"))
+    lidar_files = sorted((root_dir / "lidar").glob("*.ply"))
     for idx, lidar_fp in enumerate(lidar_files):
         # world ← ego  (4×4) for this frame
-        world_from_ego = np.load(root_dir / "ego_pose" / f"{idx:04d}.npy")
+        ego_to_world = np.load(root_dir / "ego_pose" / f"{idx:04d}.npy")
         # world ← lidar  = (world ← ego) · (ego ← lidar)
-        lidar_to_world = (world_from_ego @ lidar_extrinsic).astype(np.float32)
+        # lidar_to_world = (ego_to_world @ lidar_to_ego).astype(np.float32)
 
         # points: take xyz only
-        pts = np.load(lidar_fp)["points"].astype(np.float32)[:, :3]
+        pts = np.asarray(o3d.io.read_point_cloud(lidar_fp).points)
+        pts[:, 1] *= -1
 
         frame_key = f"{idx * index_scale_ratio:06d}.lidar_raw.npz"
-        sample[frame_key] = encode_dict_to_npz_bytes({"xyz": pts, "lidar_to_world": lidar_to_world})
+        sample[frame_key] = encode_dict_to_npz_bytes({"xyz": pts, "lidar_to_world": ego_to_world})
 
     write_to_tar(sample, out_dir / "lidar_raw" / f"{clip_id}.tar")
 
@@ -493,6 +495,7 @@ def convert_carla_image(
         for img_path in frame_paths:
             writer.append_data(iio.imread(img_path))
         writer.close()
+        cprint(f"Saved {out_mp4}", "green")
 
 
 def convert_carla_to_wds(

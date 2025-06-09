@@ -3,12 +3,18 @@ from typing import Literal
 from attrs import define, field
 
 
+def serialize(inst, field, value):
+    if isinstance(value, pathlib.Path):
+        return str(value)
+    return value
+
+
 @define
 class LidarConfig:
     range: float = field(default=120.0)
-    rotation_frequency: float = field(default=30.0)
-    points_per_second: int = field(default=2200000)
-    channels: int = field(default=64)
+    rotation_frequency: float = field(default=40.0)
+    points_per_second: int = field(default=5000000)
+    channels: int = field(default=128)
     upper_fov: float = field(default=10.0)
     lower_fov: float = field(default=-30.0)
 
@@ -41,9 +47,12 @@ class StreamConfig:
     tm_port: int = field(default=8000)
     town: str = field(default="Town01")
     fps: int = field(default=30)
-    num_frames: int = field(default=600)
-    num_vehicles: int = field(default=20)
-    num_walkers: int = field(default=30)
+    buffer_frames: int = field(default=80)  # used for few initial frames
+    num_frames: int = field(default=150)
+    num_vehicles: int = field(default=50)
+    num_walkers: int = field(default=100)
+    autopilot: bool = field(default=True)
+    percentage_pedestrians_crossing: float = field(default=0.4)
 
     # —— sensors
     lidar: LidarConfig = field(default=LidarConfig())

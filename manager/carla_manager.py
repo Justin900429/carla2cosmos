@@ -57,6 +57,7 @@ class CarlaManager:
             self.logger.debug("Stopping controllers...")
             for controller in self.world_manager.agents["controller"]:
                 controller.stop()
+                controller.destroy()
 
         if "vehicle" in self.world_manager.agents:
             self.logger.debug("Destroying vehicles...")

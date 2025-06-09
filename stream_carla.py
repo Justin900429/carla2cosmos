@@ -5,8 +5,6 @@ import queue
 
 import logging
 import carla
-import imageio
-import imageio.v3 as iio
 import cv2
 import numpy as np
 from tqdm import tqdm
@@ -14,7 +12,8 @@ import tyro
 from manager import CarlaManager
 import attrs
 from misc.custom_logger import setup_logging
-from config.stream_config import StreamConfig
+from config.stream_config import StreamConfig, serialize
+from utils.carla_utils import tf_to_rds, points_to_rds, yaw_to_rds, build_mp4
 
 CLASS_MAP = {
     "vehicle": "Vehicle",
@@ -22,80 +21,22 @@ CLASS_MAP = {
     "traffic": "TrafficSign",
 }
 
-################################################################################
-# Coordinate helpers – convert CARLA left‑hand ENU ➜ right‑hand ENU (Waymo)
-################################################################################
-_MIRROR_Y = np.diag([1, -1, 1, 1])  # homogeneous matrix that flips Y‑axis
-
 
 logger: logging.Logger
-
-
-def _rot_x(rad: float) -> np.ndarray:
-    c, s = np.cos(rad), np.sin(rad)
-    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
-
-
-def _rot_y(rad: float) -> np.ndarray:
-    c, s = np.cos(rad), np.sin(rad)
-    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
-
-
-def _rot_z(rad: float) -> np.ndarray:
-    c, s = np.cos(rad), np.sin(rad)
-    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-
-
-def tf_to_rds(carla_tf: carla.Transform) -> np.ndarray:
-    """Return 4×4 SE(3) matrix (world←ego) in right‑hand ENU."""
-    # translation
-    m = np.eye(4)
-    loc = carla_tf.location
-    m[:3, 3] = np.array([loc.x, -loc.y, loc.z])  # mirror Y
-    # rotation – CARLA gives degrees, left‑handed ENU
-    r = carla_tf.rotation
-    R_lh = _rot_z(np.radians(r.yaw)) @ _rot_y(np.radians(r.pitch)) @ _rot_x(np.radians(r.roll))
-    # convert to right‑hand by mirroring Y on both sides
-    R_rh = _MIRROR_Y[:3, :3] @ R_lh @ _MIRROR_Y[:3, :3]
-    m[:3, :3] = R_rh
-    return m
-
-
-def points_to_rds(points: np.ndarray) -> np.ndarray:
-    """Mirror Y coordinate in‑place (x y z i)."""
-    points[:, 1] *= -1.0
-    return points
-
-
-def yaw_to_rds(yaw_deg: float) -> float:
-    return -np.radians(yaw_deg)  # negate + deg→rad
-
-
-def build_mp4(
-    frame_paths: list[pathlib.Path],
-    out_file: pathlib.Path,
-    fps: int = 30,
-    quality: float = 5.0,
-    bitrate: int | None = None,
-    macro_block_size: int | None = 16,
-):
-    list_of_frames = [iio.imread(str(frame)) for frame in frame_paths]
-    with imageio.get_writer(
-        str(out_file),
-        fps=fps,
-        quality=quality,
-        bitrate=bitrate,
-        macro_block_size=macro_block_size,
-    ) as writer:
-        for frame in list_of_frames:
-            writer.append_data(frame)
-    logger.info("Video written to %s", out_file)
 
 
 def make_queue(sensor: carla.Sensor):
     q: "queue.Queue[carla.SensorData]" = queue.Queue()
     sensor.listen(q.put)
     return q
+
+
+def get_data_from_queue(q: queue.Queue[carla.SensorData], frame: int, timeout: float = 1.0):
+    try:
+        return q.get(timeout=timeout)
+    except queue.Empty:
+        logger.warning(f"missing {q.name} frame {frame}")
+        return None
 
 
 def record_clip(
@@ -105,11 +46,13 @@ def record_clip(
 ):
     carla_manager.load_town(config.town)
     world_manager = carla_manager.world_manager
+    existing_agents: list[carla.Location] = []
 
     # —— spawn ego vehicle
-    ego = world_manager.random_spawn(
+    ego = world_manager.random_spawn_car(
         config.ego.vehicle_model,
         autopilot=config.ego.autopilot,
+        existing_agents=existing_agents,
     )
 
     # —— attach LiDAR
@@ -132,21 +75,24 @@ def record_clip(
     cam_tf = carla.Transform(carla.Location(x=1.2, z=1.5))  # bonnet-edge mount
     camera = world_manager.spawn_actor(cam_bp, cam_tf, attach_to=ego)
 
-    # ── sensor queues ─────────────────────────────────────────────────────────
+    # ── sensor queues
     lidar_q = make_queue(lidar)
     cam_q = make_queue(camera)
 
     # —— spawn background traffic
-    world_manager.random_spawn_with_nums(
-        category="car",
-        autopilot=True,
+    world_manager.random_spawn_cars_with_nums(
+        autopilot=config.autopilot,
         spawn_nums=config.num_vehicles,
+        existing_agents=existing_agents,
     )
-    world_manager.random_spawn_with_nums(
-        category="pedestrian",
-        autopilot=True,
+    walkers = world_manager.random_spawn_walkers_with_nums(
         spawn_nums=config.num_walkers,
+        existing_agents=existing_agents,
     )
+    world_manager.world.set_pedestrians_cross_factor(config.percentage_pedestrians_crossing)
+    if config.autopilot:
+        world_manager.tick()
+        world_manager.set_ai_walkers(walkers)
 
     for d in ["ego_pose", "lidar", "camera_front", "labels_3d", "calibration", "hdmap"]:
         (target_out_dir / d).mkdir(parents=True, exist_ok=True)
@@ -181,8 +127,14 @@ def record_clip(
     timestamps: list[float] = []
 
     # —— main synchronous loop
-    for frame in tqdm(range(config.num_frames), desc="Simulating", ncols=0):
+    for frame in tqdm(range(config.buffer_frames + config.num_frames), desc="Simulating", ncols=0):
         world_manager.tick()
+        if frame < config.buffer_frames:
+            get_data_from_queue(lidar_q, frame)
+            get_data_from_queue(cam_q, frame)
+            continue
+
+        frame -= config.buffer_frames  # calibration frame numbers
         snap = world_manager.snapshot
         timestamps.append(snap.timestamp.elapsed_seconds)
 
@@ -190,34 +142,26 @@ def record_clip(
         np.save(target_out_dir / "ego_pose" / f"{frame:04d}.npy", tf_to_rds(ego.get_transform()))
 
         # 2. LiDAR -------------------------------------------------------------------
-        try:
-            lidar_meas: carla.LidarMeasurement = lidar_q.get(timeout=1.0)
-        except queue.Empty:
-            logger.warning("missing LiDAR frame", frame)
-            continue
-        pts = np.frombuffer(lidar_meas.raw_data, dtype=np.float32).reshape(-1, 4).copy()
-        np.savez_compressed(target_out_dir / "lidar" / f"{frame:04d}.npz", points=points_to_rds(pts))
+        lidar_meas: carla.LidarMeasurement = get_data_from_queue(lidar_q, frame)
+        lidar_meas.save_to_disk(str(target_out_dir / "lidar" / f"{frame:04d}.ply"))
 
         # 3. RGB image ---------------------------------------------------------------
-        try:
-            cam_meas: carla.Image = cam_q.get(timeout=1.0)
-        except queue.Empty:
-            logger.warning(f"missing camera frame {frame}")
-            continue
+        cam_meas: carla.Image = get_data_from_queue(cam_q, frame)
         np_img = np.reshape(np.copy(cam_meas.raw_data), (cam_meas.height, cam_meas.width, -1))[:, :, :3]
         # using cv2 here to prevent color conversion from RGB to BGR and also the saving speed is much faster
         cv2.imwrite(str(target_out_dir / "camera_front" / f"{frame:04d}.png"), np_img)
 
         # 4. dynamic actors ➜ 3‑D boxes --------------------------------------------
         labels = []
-        for actor in world_manager.actors:
+        for actor in world_manager.agents["vehicle"] + world_manager.agents["walker"]:
+            if not actor.is_alive:
+                continue
             if actor.id == ego.id or not actor.bounding_box:
                 continue
             tf = actor.get_transform()
             bb = actor.bounding_box
             class_type = actor.type_id.split(".")[0]
             if class_type not in CLASS_MAP:
-                print(class_type)
                 continue
             labels.append(
                 {
@@ -263,7 +207,7 @@ def main(config: StreamConfig):
 
         # dump the config file
         with open(target_out_dir / "config.json", "w") as fp:
-            json.dump(attrs.asdict(config), fp, indent=2)
+            json.dump(attrs.asdict(config, value_serializer=serialize), fp, indent=2)
 
         if config.make_video:
             build_mp4(

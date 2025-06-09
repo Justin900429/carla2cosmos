@@ -1,5 +1,4 @@
 import random
-from typing import Any, Callable, Literal, Optional
 from collections import defaultdict
 import carla
 import logging
@@ -7,22 +6,36 @@ import logging
 from manager.agent_model_manager import AgentModelManager
 
 
+DISTANCE_TO_OTHERS = 10
+
+
+def proximity_to_ea(location: carla.Location, existing_agents: list[carla.Location]) -> bool:
+    for ea_loc in existing_agents:
+        if ea_loc.distance(location) < DISTANCE_TO_OTHERS:
+            return True
+    return False
+
+
 class WorldManager:
     def __init__(
         self,
-        world: Optional[carla.World] = None,
+        world: carla.World | None = None,
         tm_port: int = 8000,
         logger: logging.Logger | None = None,
     ):
-        self._world = world
+        self.world = world
         self.agents: dict[str, list[carla.Actor]] = defaultdict(list)
         self.tm_port = tm_port
         self.logger = logger
         self.agent_model_manager = AgentModelManager(blueprint=self.world.get_blueprint_library())
 
     @property
-    def actors(self) -> carla.ActorList:
-        return self.world.get_actors()
+    def agents(self) -> dict[str, list[carla.Actor]]:
+        return self._agents
+
+    @agents.setter
+    def agents(self, agents: dict[str, list[carla.Actor]]):
+        self._agents = agents
 
     @property
     def map(self):
@@ -40,10 +53,10 @@ class WorldManager:
     def world(self, world: carla.World):
         self._world = world
 
-    def set_attribute(self, attribute: str, value: Any):
+    def set_attribute(self, attribute: str, value: any):
         getattr(self.world, attribute)(value)
 
-    def on_tick(self, callable: Callable):
+    def on_tick(self, callable: callable):
         self.world.on_tick(callable)
 
     def tick(self, seconds: float = 10):
@@ -78,24 +91,102 @@ class WorldManager:
             self.agents[type_id_prefix].append(actor)
         return actor
 
-    def random_spawn(
+    def random_spawn_car(
         self,
-        blueprint: str | None = None,
-        category: Literal["car", "pedestrian"] = "car",
+        blueprint: str | carla.ActorBlueprint | None = None,
         autopilot: bool = True,
+        existing_agents: list[carla.Location] | None = None,
     ) -> carla.Actor:
-        spawn_points = self.map.get_spawn_points()
-        ego_tf = random.choice(spawn_points)
         if blueprint is not None:
-            ego_bp = self.find_blueprint(blueprint)
+            bp = self.find_blueprint(blueprint)
         else:
-            ego_bp_list = self.agent_model_manager.categories[category]
-            ego_bp = random.choice(ego_bp_list)
-        agent = self.spawn_actor(ego_bp, ego_tf)
+            bp = self.agent_model_manager.categories["car"]
+            bp = random.choice(bp)
+
+        spawn_points = self.map.get_spawn_points()
+
+        spawn_point = random.choice(spawn_points)
+        if existing_agents is not None:
+            is_proximity_to_ea = proximity_to_ea(spawn_point.location, existing_agents)
+            while is_proximity_to_ea:
+                spawn_point = random.choice(spawn_points)
+                if spawn_point is not None:
+                    is_proximity_to_ea = proximity_to_ea(spawn_point.location, existing_agents)
+
+        agent = self.spawn_actor(bp, spawn_point)
         if agent is not None:
-            if autopilot and agent.type_id.startswith("vehicle"):
+            if autopilot:
                 agent.set_autopilot(True, self.tm_port)
-            elif autopilot and agent.type_id.startswith("walker"):
+            if existing_agents is not None:
+                existing_agents.append(agent.get_transform().location)
+        return agent
+
+    def random_spawn_cars_with_nums(
+        self,
+        blueprint: str | carla.ActorBlueprint | None = None,
+        autopilot: bool = True,
+        existing_agents: list[carla.Location] | None = None,
+        spawn_nums: int = 1,
+    ) -> list[carla.Actor]:
+        if blueprint is not None:
+            bp = self.find_blueprint(blueprint)
+            bp_list = [bp]
+        else:
+            bp_list = self.agent_model_manager.categories["car"]
+
+        actors = []
+        world_spawn_points = self.map.get_spawn_points()
+        while len(actors) < spawn_nums:
+            spawn_points = []
+            for _ in range(spawn_nums - len(actors)):
+                spawn_point = random.choice(world_spawn_points)
+                if existing_agents is not None:
+                    is_proximity_to_ea = proximity_to_ea(spawn_point.location, existing_agents)
+                    while is_proximity_to_ea:
+                        spawn_point = random.choice(world_spawn_points)
+                        if spawn_point is not None:
+                            is_proximity_to_ea = proximity_to_ea(spawn_point.location, existing_agents)
+                spawn_points.append(spawn_point)
+                if existing_agents is not None:
+                    existing_agents.append(spawn_point.location)
+
+            for spawn_point in spawn_points:
+                bp = random.choice(bp_list)
+                actor = self.spawn_actor(bp, spawn_point)
+                if actor is not None:
+                    if autopilot:
+                        actor.set_autopilot(True, self.tm_port)
+                    actors.append(actor)
+        return actors
+
+    def random_spawn_walker(
+        self,
+        blueprint: str | carla.ActorBlueprint | None = None,
+        autopilot: bool = True,
+        existing_agents: list[carla.Location] | None = None,
+    ) -> carla.Actor:
+        spawn_point = self.world.get_random_location_from_navigation()
+        if existing_agents is not None:
+            is_proximity_to_ea = proximity_to_ea(spawn_point, existing_agents)
+            while is_proximity_to_ea:
+                spawn_point = self.world.get_random_location_from_navigation()
+                if spawn_point is not None:
+                    is_proximity_to_ea = proximity_to_ea(spawn_point, existing_agents)
+
+        spawn_point = carla.Transform(location=spawn_point + carla.Location(z=2))
+
+        if blueprint is not None:
+            bp = self.find_blueprint(blueprint)
+        else:
+            bp = self.agent_model_manager.categories["pedestrian"]
+            bp = random.choice(bp)
+
+        if bp.has_attribute("is_invincible"):
+            bp.set_attribute("is_invincible", "false")
+
+        agent = self.spawn_actor(bp, spawn_point)
+        if agent is not None:
+            if autopilot:
                 walker_controller_bp = self.find_blueprint("controller.ai.walker")
                 walker_controller = self.spawn_actor(
                     walker_controller_bp, agent.get_transform(), attach_to=agent
@@ -104,26 +195,51 @@ class WorldManager:
                     walker_controller.start()
                     walker_controller.go_to_location(self.world.get_random_location_from_navigation())
                     walker_controller.set_max_speed(1 + random.random())
-                    self.logger.debug(f"spawned walker controller {walker_controller.type_id}")
+            if existing_agents is not None:
+                existing_agents.append(agent.get_transform().location)
         return agent
 
-    def random_spawn_with_nums(
+    def random_spawn_walkers_with_nums(
         self,
-        blueprint: str | None = None,
-        category: Literal["car", "pedestrian"] = "car",
-        autopilot: bool = True,
+        blueprint: str | carla.ActorBlueprint | None = None,
+        existing_agents: list[carla.Location] | None = None,
         spawn_nums: int = 1,
     ) -> list[carla.Actor]:
         if blueprint is not None:
             bp = self.find_blueprint(blueprint)
             bp_list = [bp]
         else:
-            bp_list = self.agent_model_manager.categories[category]
+            bp_list = self.agent_model_manager.categories["pedestrian"]
         actors = []
-
         while len(actors) < spawn_nums:
-            bp = random.choice(bp_list)
-            actor = self.random_spawn(blueprint=bp, autopilot=autopilot)
-            if actor is not None:
-                actors.append(actor)
+            spawn_points = []
+            for _ in range(spawn_nums - len(actors)):
+                spawn_point = self.world.get_random_location_from_navigation()
+                if existing_agents is not None:
+                    is_proximity_to_ea = proximity_to_ea(spawn_point, existing_agents)
+                    while is_proximity_to_ea:
+                        spawn_point = self.world.get_random_location_from_navigation()
+                        if spawn_point is not None:
+                            is_proximity_to_ea = proximity_to_ea(spawn_point, existing_agents)
+                spawn_points.append(carla.Transform(location=spawn_point + carla.Location(z=1)))
+                if existing_agents is not None:
+                    existing_agents.append(spawn_point)
+            for spawn_point in spawn_points:
+                walker_bp = random.choice(bp_list)
+                if walker_bp.has_attribute("is_invincible"):
+                    walker_bp.set_attribute("is_invincible", "false")
+                actor = self.spawn_actor(walker_bp, spawn_point)
+                if actor is not None:
+                    actors.append(actor)
         return actors
+
+    def set_ai_walkers(self, walkers: list[carla.Actor]):
+        for walker in walkers:
+            walker_controller_bp = self.find_blueprint("controller.ai.walker")
+            walker_controller = self.spawn_actor(
+                walker_controller_bp, walker.get_transform(), attach_to=walker
+            )
+            if walker_controller is not None:
+                walker_controller.start()
+                walker_controller.go_to_location(self.world.get_random_location_from_navigation())
+                walker_controller.set_max_speed(1 + random.random())

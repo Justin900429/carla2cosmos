@@ -13,7 +13,7 @@ from manager import CarlaManager
 import attrs
 from misc.custom_logger import setup_logging
 from config.stream_config import StreamConfig, serialize
-from utils.carla_utils import tf_to_rds, points_to_rds, yaw_to_rds, build_mp4
+from utils.carla_utils import tf_to_rds, yaw_to_rds, build_mp4
 
 CLASS_MAP = {
     "vehicle": "Vehicle",

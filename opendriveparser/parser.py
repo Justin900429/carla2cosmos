@@ -27,6 +27,7 @@ from opendriveparser.elements.junction import (
     Connection as JunctionConnection,
     LaneLink as JunctionConnectionLaneLink,
 )
+from opendriveparser.elements.object import CrossWalk
 
 
 def parse_opendrive(rootNode):
@@ -366,8 +367,23 @@ def parse_opendrive(rootNode):
                 for widthIdx, width in enumerate(lane.widths):
                     width.length = widthsLengths[widthIdx]
 
-        # Objects
-        # TODO
+        # crosswalks
+        for objects in road.findall("objects"):
+            for object in objects.findall("object"):
+                if object.get("type") != "crosswalk":
+                    continue
+                newCrossWalk = CrossWalk()
+                newCrossWalk.id = object.get("id")
+                newCrossWalk.name = object.get("name")
+                newCrossWalk.sPos = object.get("s")
+                newCrossWalk.tPos = object.get("t")
+                newCrossWalk.hdg = object.get("hdg", "0")
+                for corner in object.findall("outline/cornerLocal")[
+                    :-1
+                ]:  # ignore the last one since it's the same as the first one
+                    newCrossWalk.corners.append((float(corner.get("u", "0")), float(corner.get("v", "0"))))
+                if len(newCrossWalk.corners) > 2:
+                    newRoad.crosswalks.append(newCrossWalk)
 
         # Signals
         # TODO

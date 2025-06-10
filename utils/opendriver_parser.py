@@ -377,11 +377,15 @@ def get_lane_area_of_one_road(road: Road, step: float = 0.01) -> dict[str, any]:
     return total_areas
 
 
-def get_all_lanes(road_network: OpenDrive, step: float = 0.1) -> dict[str, any]:
+def get_all_lanes(
+    road_network: OpenDrive, step: float = 0.1, ignore_junction: bool = False
+) -> dict[str, any]:
     roads = road_network.roads
     total_areas_all_roads = dict()
 
     for road in roads:
+        if ignore_junction and road.junction is not None:
+            continue
         lanes_of_one_road = get_lane_area_of_one_road(road, step=step)
         total_areas_all_roads = {**total_areas_all_roads, **lanes_of_one_road}
 

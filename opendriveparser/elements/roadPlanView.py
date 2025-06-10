@@ -1,11 +1,39 @@
 import abc
 import numpy as np
 from eulerspiral import eulerspiral
+import math
+
+
+class Geometry(object):
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
+    def getStartPosition(self):
+        """Returns the overall geometry length"""
+        return
+
+    @abc.abstractmethod
+    def getLength(self):
+        """Returns the overall geometry length"""
+        return
+
+    @abc.abstractmethod
+    def calcPosition(self, s):
+        """Calculates the position of the geometry as if the starting point is (0/0)"""
+        return
 
 
 class PlanView(object):
     def __init__(self):
-        self._geometries = []
+        self._geometries: list[Geometry] = []
+
+    @property
+    def geometries(self):
+        return self._geometries
+
+    @geometries.setter
+    def geometries(self, value):
+        self._geometries = value
 
     def addLine(self, startPosition, heading, length):
         self._geometries.append(Line(startPosition, heading, length))
@@ -44,24 +72,17 @@ class PlanView(object):
             "Tried to calculate a position outside of the borders of the trajectory by s=" + str(sPos)
         )
 
-
-class Geometry(object):
-    __metaclass__ = abc.ABCMeta
-
-    @abc.abstractmethod
-    def getStartPosition(self):
-        """Returns the overall geometry length"""
-        return
-
-    @abc.abstractmethod
-    def getLength(self):
-        """Returns the overall geometry length"""
-        return
-
-    @abc.abstractmethod
-    def calcPosition(self, s):
-        """Calculates the position of the geometry as if the starting point is (0/0)"""
-        return
+    def planview_at(self, target_s: float) -> tuple[float, float, float] | None:
+        s_acc = 0.0
+        for geometry in self.geometries:
+            L = geometry.getLength()
+            if s_acc + L < target_s:
+                s_acc += L
+                continue
+            ds = target_s - s_acc
+            pos, hdg = geometry.calcPosition(ds)
+            return pos[0], pos[1], hdg
+        return None
 
 
 class Line(Geometry):

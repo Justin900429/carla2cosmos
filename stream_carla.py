@@ -159,13 +159,17 @@ def record_clip(
             if actor.id == ego.id or not actor.bounding_box:
                 continue
             tf = actor.get_transform()
-            bb = actor.bounding_box
+            bb = actor.bounding_box  # the location of the actor might not be the center of the bounding box
             class_type = actor.type_id.split(".")[0]
             if class_type not in CLASS_MAP:
                 continue
             labels.append(
                 {
-                    "center": [tf.location.x, -tf.location.y, tf.location.z],
+                    "center": [
+                        tf.location.x + bb.location.x,
+                        -(tf.location.y + bb.location.y),
+                        (tf.location.z + bb.location.z),
+                    ],
                     "size": [bb.extent.x * 2, bb.extent.y * 2, bb.extent.z * 2],
                     "yaw": yaw_to_rds(tf.rotation.yaw),
                     "class": CLASS_MAP[class_type],

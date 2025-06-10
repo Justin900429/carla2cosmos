@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -85,13 +86,14 @@ def convert_carla_hdmap(
 
     xodr_file = record_root / "hdmap" / "static_map.xodr"
     road_network = load_xodr_and_parse(xodr_file)
-    total_areas = get_all_lanes(road_network, step=sample_step)
+    total_areas = get_all_lanes(road_network, step=sample_step, ignore_junction=True)
 
     ALLOW_TYPES = ["driving", "shoulder"]
 
     boundaries_sample = {"__key__": clip_id, "road_boundaries.json": {"labels": []}}
     lanes_sample = {"__key__": clip_id, "lanes.json": {"labels": []}}
     lanelines_sample = {"__key__": clip_id, "lanelines.json": {"labels": []}}
+    crosswalks_sample = {"__key__": clip_id, "crosswalks.json": {"labels": []}}
 
     for layer_data in total_areas.values():
         # Check whether the layer has reference points as the middle lane
@@ -167,9 +169,41 @@ def convert_carla_hdmap(
             }
         )
 
+    # --------------- revised cross-walk extraction ------------------------
+    for road in road_network.roads:
+        for crosswalk in road.crosswalks:
+            s = crosswalk.sPos
+            t = crosswalk.tPos
+            hdg_obj = crosswalk.hdg
+
+            # 1) locate object origin in world
+            res = road.planView.planview_at(s)
+            if res is None:
+                continue
+            x_ref, y_ref, hdg_ref = res
+            x_obj = x_ref - t * math.sin(hdg_ref)
+            y_obj = y_ref + t * math.cos(hdg_ref)
+            hdg = hdg_ref + hdg_obj
+
+            # 2) transform every cornerLocal (u,v) into world
+            polys = []
+            for u, v in crosswalk.corners:
+                x = x_obj + u * math.cos(hdg) - v * math.sin(hdg)
+                y = y_obj + u * math.sin(hdg) + v * math.cos(hdg)
+                polys.append([x, y, 0.0])
+
+            crosswalks_sample["crosswalks.json"]["labels"].append(
+                {
+                    "labelData": {
+                        "shape3d": {"surface": {"vertices": polys}},
+                    }
+                }
+            )
+
     write_to_tar(boundaries_sample, out_dir / "3d_road_boundaries" / f"{clip_id}.tar")
     write_to_tar(lanes_sample, out_dir / "3d_lanes" / f"{clip_id}.tar")
     write_to_tar(lanelines_sample, out_dir / "3d_lanelines" / f"{clip_id}.tar")
+    write_to_tar(crosswalks_sample, out_dir / "3d_crosswalks" / f"{clip_id}.tar")
 
 
 def convert_carla_pose(
@@ -408,10 +442,10 @@ def convert_carla_lidar(
         • Our CARLA recorder is already 30 Hz, so **leave this as 1**.
     """
     # ---------------------------------------------------- load static extrinsic
-    lidar_to_ego = np.asarray(
-        json.loads((root_dir / "calibration" / "lidar.json").read_text())["extrinsic"],
-        dtype=np.float32,
-    )  # ego ← lidar  (4×4)
+    # lidar_to_ego = np.asarray(
+    #     json.loads((root_dir / "calibration" / "lidar.json").read_text())["extrinsic"],
+    #     dtype=np.float32,
+    # )  # ego ← lidar  (4×4)
 
     # ---------------------------------------------------- helper for .npz bytes
     sample = {"__key__": clip_id}

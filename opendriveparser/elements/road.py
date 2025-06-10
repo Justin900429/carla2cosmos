@@ -3,6 +3,7 @@ from opendriveparser.elements.roadLink import Link
 from opendriveparser.elements.roadLanes import Lanes
 from opendriveparser.elements.roadElevationProfile import ElevationProfile
 from opendriveparser.elements.roadLateralProfile import LateralProfile
+from opendriveparser.elements.object import CrossWalk
 
 
 class Road(object):
@@ -19,6 +20,7 @@ class Road(object):
         self._elevationProfile = ElevationProfile()
         self._lateralProfile = LateralProfile()
         self._lanes = Lanes()
+        self._crosswalks: list[CrossWalk] = []
 
     @property
     def id(self):
@@ -73,3 +75,11 @@ class Road(object):
     @property
     def lanes(self):
         return self._lanes
+
+    @property
+    def crosswalks(self):
+        return self._crosswalks
+
+    @crosswalks.setter
+    def crosswalks(self, value):
+        self._crosswalks = value

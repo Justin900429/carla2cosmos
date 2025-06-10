@@ -1,9 +1,13 @@
+from opendriveparser.elements.road import Road
+from opendriveparser.elements.junction import Junction
+
+
 class OpenDrive(object):
     def __init__(self):
         self._header = None
-        self._roads = []
+        self._roads: list[Road] = []
         self._controllers = []
-        self._junctions = []
+        self._junctions: list[Junction] = []
         self._junctionGroups = []
         self._stations = []
 

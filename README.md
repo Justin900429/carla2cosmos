@@ -5,6 +5,18 @@ This repository provides a toolkit for converting CARLA simulation data to the R
 >[!CAUTION]
 > This repository **DOES NOT** perform direct style transfer from CARLA to real-world video. Instead, it extracts interactive data like bounding boxes and LiDAR points to help generate real-world videos containing similar traffic scenes and behaviors.
 
+| HD Map | Lidar | Generate Output |
+| ------ | ----- | --------------- |
+|![HD Map](assets/hdmap.gif) | ![lidar](assets/lidar.gif) | ![output](assets/output_video.gif) |
+
+<details>
+
+<summary>Prompt</summary>
+
+The video is captured from a camera mounted on a car. The camera is facing forward. The video showcases a scenic golden-hour drive through a suburban area, bathed in the warm, golden hues of the setting sun. The dashboard camera captures the play of light and shadow as the sun’s rays filter through the trees, casting elongated patterns onto the road. The streetlights remain off, as the golden glow of the late afternoon sun provides ample illumination. The two-lane road appears to shimmer under the soft light, while the concrete barrier on the left side of the road reflects subtle warm tones. The stone wall on the right, adorned with lush greenery, stands out vibrantly under the golden light, with the palm trees swaying gently in the evening breeze. The golden light, combined with the quiet suburban landscape, creates an atmosphere of tranquility and warmth, making for a mesmerizing and soothing drive.
+</details>
+
+
 ## ▶️ Recording a Clip
 
 Stream and record synchronous CARLA sessions at **30 Hz**, saving only the essential data needed to convert each clip into the **RDS-HQ** format (used by Cosmos-AV). To record the data, run the `stream_carla.py` script to begin recording:
@@ -92,12 +104,12 @@ python toolkit/render_rds_hq.py \
   -d waymo \
   -i {DIR_WITH_RDS_HQ_DATA} \
   -o {DIR_FOR_SAVING_RENDERED_DATA} \
-  -c pinhole
+  -c ftheta  # recommend
 
 # for example
 python toolkit/render_rds_hq.py \
   -d waymo -i outputs \
-  -o demo_render -c pinhole
+  -o demo_render -c ftheta # recommend
 ```
 
 This will create a directory with the following structure:

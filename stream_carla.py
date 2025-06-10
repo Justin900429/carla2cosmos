@@ -72,7 +72,7 @@ def record_clip(
     cam_bp.set_attribute("image_size_y", str(config.camera.image_size_y))
     cam_bp.set_attribute("fov", str(config.camera.fov))
     cam_bp.set_attribute("sensor_tick", str(config.camera.sensor_tick))  # 30 Hz
-    cam_tf = carla.Transform(carla.Location(x=1.2, z=1.5))  # bonnet-edge mount
+    cam_tf = carla.Transform(carla.Location(x=1, z=2))  # bonnet-edge mount
     camera = world_manager.spawn_actor(cam_bp, cam_tf, attach_to=ego)
 
     # ── sensor queues

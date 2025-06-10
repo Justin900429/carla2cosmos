@@ -442,27 +442,27 @@ def convert_carla_lidar(
         • Our CARLA recorder is already 30 Hz, so **leave this as 1**.
     """
     # ---------------------------------------------------- load static extrinsic
-    # lidar_to_ego = np.asarray(
-    #     json.loads((root_dir / "calibration" / "lidar.json").read_text())["extrinsic"],
-    #     dtype=np.float32,
-    # )  # ego ← lidar  (4×4)
+    lidar_to_ego = np.asarray(
+        json.loads((root_dir / "calibration" / "lidar.json").read_text())["extrinsic"],
+        dtype=np.float32,
+    )  # ego ← lidar  (4×4)
 
     # ---------------------------------------------------- helper for .npz bytes
     sample = {"__key__": clip_id}
 
     lidar_files = sorted((root_dir / "lidar").glob("*.ply"))
     for idx, lidar_fp in enumerate(lidar_files):
-        # world ← ego  (4×4) for this frame
+        # # world ← ego  (4×4) for this frame
         ego_to_world = np.load(root_dir / "ego_pose" / f"{idx:04d}.npy")
         # world ← lidar  = (world ← ego) · (ego ← lidar)
-        # lidar_to_world = (ego_to_world @ lidar_to_ego).astype(np.float32)
+        lidar_to_world = (ego_to_world @ lidar_to_ego).astype(np.float32)
 
         # points: take xyz only
         pts = np.asarray(o3d.io.read_point_cloud(lidar_fp).points)
         pts[:, 1] *= -1
 
         frame_key = f"{idx * index_scale_ratio:06d}.lidar_raw.npz"
-        sample[frame_key] = encode_dict_to_npz_bytes({"xyz": pts, "lidar_to_world": ego_to_world})
+        sample[frame_key] = encode_dict_to_npz_bytes({"xyz": pts, "lidar_to_world": lidar_to_world})
 
     write_to_tar(sample, out_dir / "lidar_raw" / f"{clip_id}.tar")
 

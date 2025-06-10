@@ -14,7 +14,7 @@ class LidarConfig:
     range: float = field(default=120.0)
     rotation_frequency: float = field(default=40.0)
     points_per_second: int = field(default=5000000)
-    channels: int = field(default=128)
+    channels: int = field(default=64)
     upper_fov: float = field(default=10.0)
     lower_fov: float = field(default=-30.0)
 

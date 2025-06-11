@@ -18,8 +18,10 @@ from utils.carla_utils import tf_to_rds, yaw_to_rds, build_mp4
 CLASS_MAP = {
     "vehicle": "Vehicle",
     "walker": "Pedestrian",
-    "traffic": "TrafficSign",
+    # "traffic": "TrafficSign",
 }
+
+NOT_ALLOWED_PIERCING = set(["buildings", "walls"])
 
 
 logger: logging.Logger
@@ -37,6 +39,39 @@ def get_data_from_queue(q: queue.Queue[carla.SensorData], frame: int, timeout: f
     except queue.Empty:
         logger.warning(f"missing {q.name} frame {frame}")
         return None
+
+
+def is_actor_visible(
+    world: carla.World,
+    actor: carla.Actor,
+    camera_location: carla.Location,
+    visible_distance_threshold: float = 10.0,
+):
+    # Add vertical offset to aim at center of object, not ground
+    bbox = actor.bounding_box
+    actor_transform = actor.get_transform()
+    offset = carla.Location(
+        x=actor_transform.location.x + bbox.location.x,
+        y=actor_transform.location.y + bbox.location.y,
+        z=actor_transform.location.z + bbox.location.z,
+    )
+    target_location = offset
+
+    # Perform ray casting
+    raycast_list = world.cast_ray(target_location, camera_location)
+
+    if not raycast_list:
+        return False
+
+    if len(raycast_list) > 2:
+        for ray_cast in raycast_list[1:-1]:  # skip the first and the last ray cast
+            label = str(ray_cast.label).lower()
+            if label in NOT_ALLOWED_PIERCING:
+                return False
+
+    actor_distance = offset.distance(camera_location)
+
+    return actor_distance < visible_distance_threshold
 
 
 def record_clip(
@@ -129,6 +164,7 @@ def record_clip(
     # —— main synchronous loop
     for frame in tqdm(range(config.buffer_frames + config.num_frames), desc="Simulating", ncols=0):
         world_manager.tick()
+        global_camera_location = ego.get_transform().location + cam_tf.location
         if frame < config.buffer_frames:
             get_data_from_queue(lidar_q, frame)
             get_data_from_queue(cam_q, frame)
@@ -153,13 +189,23 @@ def record_clip(
 
         # 4. dynamic actors ➜ 3‑D boxes --------------------------------------------
         labels = []
-        for actor in world_manager.agents["vehicle"] + world_manager.agents["walker"]:
+        for actor in world_manager.actors:
             if not actor.is_alive:
+                continue
+            if actor.type_id.split(".")[0] not in CLASS_MAP:
                 continue
             if actor.id == ego.id or not actor.bounding_box:
                 continue
+            if not is_actor_visible(
+                world_manager.world,
+                actor,
+                global_camera_location,
+                visible_distance_threshold=config.visible_distance_threshold,
+            ):
+                continue
             tf = actor.get_transform()
-            bb = actor.bounding_box  # the location of the actor might not be the center of the bounding box
+            bb = actor.bounding_box
+
             class_type = actor.type_id.split(".")[0]
             if class_type not in CLASS_MAP:
                 continue

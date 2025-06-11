@@ -38,6 +38,10 @@ class WorldManager:
         self._agents = agents
 
     @property
+    def actors(self) -> list[carla.Actor]:
+        return self.world.get_actors()
+
+    @property
     def map(self):
         return self.world.get_map()
 
@@ -186,6 +190,8 @@ class WorldManager:
 
         agent = self.spawn_actor(bp, spawn_point)
         if agent is not None:
+            agent.set_collisions(True)
+            agent.set_simulate_physics(True)
             if autopilot:
                 walker_controller_bp = self.find_blueprint("controller.ai.walker")
                 walker_controller = self.spawn_actor(
@@ -230,6 +236,8 @@ class WorldManager:
                     walker_bp.set_attribute("is_invincible", "false")
                 actor = self.spawn_actor(walker_bp, spawn_point)
                 if actor is not None:
+                    actor.set_collisions(True)
+                    actor.set_simulate_physics(True)
                     actors.append(actor)
         return actors
 

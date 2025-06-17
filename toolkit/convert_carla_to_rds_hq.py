@@ -11,8 +11,7 @@ from tqdm import tqdm
 import tyro
 from termcolor import cprint
 import open3d as o3d
-
-from utils.opendriver_parser import load_xodr_and_parse, get_all_lanes
+from utils.opendriver_parser import load_xodr_and_parse
 from utils.wds_utils import write_to_tar, encode_dict_to_npz_bytes
 
 
@@ -57,7 +56,6 @@ def convert_carla_hdmap(
     record_root: Path,
     out_dir: Path,
     clip_id: str,
-    sample_step: float = 1.0,  # finer sampling = better fidelity
 ):
     """
     Parse the OpenDRIVE (*.xodr) map saved by *record_clip()* and emit four
@@ -80,96 +78,11 @@ def convert_carla_hdmap(
         Root where the `3d_lanes/<clip_id>.tar`, `3d_lanelines/<clip_id>.tar`, `3d_road_boundaries/<clip_id>.tar`, and `3d_crosswalks/<clip_id>.tar` should be created.
     clip_id : str
         Identifier for this clip (becomes the tar file name and the __key__).
-    sample_step : float, default 2.0
-        Sample step along the reference line (in meters).
     """
 
+    crosswalks_sample = {"__key__": clip_id, "crosswalks.json": {"labels": []}}
     xodr_file = record_root / "hdmap" / "static_map.xodr"
     road_network = load_xodr_and_parse(xodr_file)
-    total_areas = get_all_lanes(road_network, step=sample_step, ignore_junction=True)
-
-    ALLOW_TYPES = ["driving", "shoulder"]
-
-    boundaries_sample = {"__key__": clip_id, "road_boundaries.json": {"labels": []}}
-    lanes_sample = {"__key__": clip_id, "lanes.json": {"labels": []}}
-    lanelines_sample = {"__key__": clip_id, "lanelines.json": {"labels": []}}
-    crosswalks_sample = {"__key__": clip_id, "crosswalks.json": {"labels": []}}
-
-    for layer_data in total_areas.values():
-        # Check whether the layer has reference points as the middle lane
-        reference_points = layer_data["reference_points"]
-        if not reference_points:
-            continue
-
-        types = layer_data["types"]
-
-        # 1. boundaries --------------------------------
-        # 2. lanelines ---------------------------------
-        left_lanes_areas = layer_data["left_lanes_area"]
-        right_lanes_area = layer_data["right_lanes_area"]
-
-        for left_lane_id, left_lane_area in left_lanes_areas.items():
-            type_of_lane = types[left_lane_id]
-            if type_of_lane not in ALLOW_TYPES:
-                continue
-            inner_points = left_lane_area["inner"]
-
-            if type_of_lane == "shoulder":  # inner as the driving lane boundary
-                boundary_points = [(float(x), float(y), 0) for x, y in inner_points]
-                boundaries_sample["road_boundaries.json"]["labels"].append(
-                    {
-                        "labelData": {
-                            "shape3d": {"polyline3d": {"vertices": boundary_points}},
-                        }
-                    }
-                )
-            else:
-                laneline_points = [(float(x), float(y), 0) for x, y in inner_points]
-                lanelines_sample["lanelines.json"]["labels"].append(
-                    {
-                        "labelData": {
-                            "shape3d": {"polyline3d": {"vertices": laneline_points}},
-                        }
-                    }
-                )
-
-        for right_lane_id, right_lane_area in right_lanes_area.items():
-            type_of_lane = types[right_lane_id]
-            if type_of_lane not in ALLOW_TYPES:
-                continue
-            inner_points = right_lane_area["inner"]
-
-            if type_of_lane == "shoulder":  # inner as the driving lane boundary
-                boundary_points = [(float(x), float(y), 0) for x, y in inner_points]
-                boundaries_sample["road_boundaries.json"]["labels"].append(
-                    {
-                        "labelData": {
-                            "shape3d": {"polyline3d": {"vertices": boundary_points}},
-                        }
-                    }
-                )
-            else:
-                laneline_points = [(float(x), float(y), 0) for x, y in inner_points]
-                lanelines_sample["lanelines.json"]["labels"].append(
-                    {
-                        "labelData": {
-                            "shape3d": {"polyline3d": {"vertices": laneline_points}},
-                        }
-                    }
-                )
-
-        # 3. lanes ---------------------------------------------------
-        position_center_lane = reference_points["position_center_lane"]
-        position_center_lane = [[float(x), float(y), 0] for x, y in position_center_lane]
-        lanes_sample["lanes.json"]["labels"].append(
-            {
-                "labelData": {
-                    "shape3d": {"polyline3d": {"vertices": position_center_lane}},
-                }
-            }
-        )
-
-    # --------------- revised cross-walk extraction ------------------------
     for road in road_network.roads:
         for crosswalk in road.crosswalks:
             s = crosswalk.sPos
@@ -199,11 +112,32 @@ def convert_carla_hdmap(
                     }
                 }
             )
-
-    write_to_tar(boundaries_sample, out_dir / "3d_road_boundaries" / f"{clip_id}.tar")
-    write_to_tar(lanes_sample, out_dir / "3d_lanes" / f"{clip_id}.tar")
-    write_to_tar(lanelines_sample, out_dir / "3d_lanelines" / f"{clip_id}.tar")
     write_to_tar(crosswalks_sample, out_dir / "3d_crosswalks" / f"{clip_id}.tar")
+
+    boundaries_sample = {"__key__": clip_id}
+    with open(record_root / "hdmap" / "road_boundaries.json", "r") as fp:
+        boundaries_sample["road_boundaries.json"] = json.load(fp)
+    write_to_tar(boundaries_sample, out_dir / "3d_road_boundaries" / f"{clip_id}.tar")
+
+    lanelines_sample = {"__key__": clip_id}
+    with open(record_root / "hdmap" / "lanelines.json", "r") as fp:
+        lanelines_sample["lanelines.json"] = json.load(fp)
+    write_to_tar(lanelines_sample, out_dir / "3d_lanelines" / f"{clip_id}.tar")
+
+    traffic_lights_sample = {"__key__": clip_id}
+    with open(record_root / "hdmap" / "traffic_lights.json", "r") as fp:
+        traffic_lights_sample["traffic_lights.json"] = json.load(fp)
+    write_to_tar(traffic_lights_sample, out_dir / "3d_traffic_lights" / f"{clip_id}.tar")
+
+    traffic_signs_sample = {"__key__": clip_id}
+    with open(record_root / "hdmap" / "traffic_signs.json", "r") as fp:
+        traffic_signs_sample["traffic_signs.json"] = json.load(fp)
+    write_to_tar(traffic_signs_sample, out_dir / "3d_traffic_signs" / f"{clip_id}.tar")
+    poles_sample = {"__key__": clip_id}
+
+    with open(record_root / "hdmap" / "poles.json", "r") as fp:
+        poles_sample["poles.json"] = json.load(fp)
+    write_to_tar(poles_sample, out_dir / "3d_poles" / f"{clip_id}.tar")
 
 
 def convert_carla_pose(

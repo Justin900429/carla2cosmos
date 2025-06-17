@@ -370,24 +370,20 @@ def parse_opendrive(rootNode):
         # crosswalks
         for objects in road.findall("objects"):
             for object in objects.findall("object"):
-                if object.get("type") != "crosswalk":
-                    continue
-                newCrossWalk = CrossWalk()
-                newCrossWalk.id = object.get("id")
-                newCrossWalk.name = object.get("name")
-                newCrossWalk.sPos = object.get("s")
-                newCrossWalk.tPos = object.get("t")
-                newCrossWalk.hdg = object.get("hdg", "0")
-                for corner in object.findall("outline/cornerLocal")[
-                    :-1
-                ]:  # ignore the last one since it's the same as the first one
-                    newCrossWalk.corners.append((float(corner.get("u", "0")), float(corner.get("v", "0"))))
-                if len(newCrossWalk.corners) > 2:
-                    newRoad.crosswalks.append(newCrossWalk)
-
-        # Signals
-        # TODO
-
-        newOpenDrive.roads.append(newRoad)
+                if object.get("type") == "crosswalk":
+                    newCrossWalk = CrossWalk()
+                    newCrossWalk.id = object.get("id")
+                    newCrossWalk.name = object.get("name")
+                    newCrossWalk.sPos = object.get("s")
+                    newCrossWalk.tPos = object.get("t")
+                    newCrossWalk.hdg = object.get("hdg", "0")
+                    for corner in object.findall("outline/cornerLocal")[
+                        :-1
+                    ]:  # ignore the last one since it's the same as the first one
+                        newCrossWalk.corners.append(
+                            (float(corner.get("u", "0")), float(corner.get("v", "0")))
+                        )
+                    if len(newCrossWalk.corners) > 2:
+                        newRoad.crosswalks.append(newCrossWalk)
 
     return newOpenDrive

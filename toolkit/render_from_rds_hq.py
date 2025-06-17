@@ -19,17 +19,11 @@ import ray
 from tqdm import tqdm
 from pathlib import Path
 from termcolor import cprint, colored
+
 from utils.wds_utils import get_sample
-from utils.bbox_utils import (
-    create_bbox_projection,
-    interpolate_bbox,
-    fix_static_objects,
-)
+from utils.bbox_utils import create_bbox_projection, interpolate_bbox, fix_static_objects
 from utils.minimap_utils import create_minimap_projection, simplify_minimap
-from utils.pcd_utils import (
-    batch_move_points_within_bboxes_sparse,
-    forward_warp_multiframes_sparse_depth_only,
-)
+from utils.pcd_utils import batch_move_points_within_bboxes_sparse, forward_warp_multiframes_sparse_depth_only
 from utils.camera.pinhole import PinholeCamera
 from utils.camera.ftheta import FThetaCamera
 from utils.ray_utils import ray_remote, wait_for_futures
@@ -37,7 +31,7 @@ from utils.ray_utils import ray_remote, wait_for_futures
 USE_RAY = True
 
 
-def get_low_fps_indices(high_indices, step=3):
+def get_nearest_lidar_indices(high_indices, step=3):
     low_indices = []
     low_indices_times_step = []
     for hi in high_indices:
@@ -50,13 +44,7 @@ def get_low_fps_indices(high_indices, step=3):
 
 
 def prepare_input(
-    input_root,
-    clip_id,
-    settings,
-    camera_type,
-    post_training,
-    resize_resolution,
-    novel_pose_folder,
+    input_root, clip_id, settings, camera_type, post_training, resize_resolution, novel_pose_folder
 ):
     """
     Prepare input for rendering.
@@ -145,11 +133,9 @@ def prepare_input(
             else:
                 cprint(f"Ftheta intrinsic file does not exist: {intrinsic_file}", "red")
                 cprint(
-                    "===> So we will use default ftheta intrinsic for rendering",
-                    "yellow",
-                    attrs=["bold"],
+                    f"===> So we will use default ftheta intrinsic for rendering", "yellow", attrs=["bold"]
                 )
-                intrinsic_file = "config/default_ftheta_intrinsic.tar"
+                intrinsic_file = "assets/default_ftheta_intrinsic.tar"
                 camera_name_in_rds_hq = settings["CAMERAS_TO_RDS_HQ"][camera_name]
                 intrinsic_data = get_sample(intrinsic_file)
                 intrinsic_this_cam = intrinsic_data[f"{camera_type}_intrinsic.{camera_name_in_rds_hq}.npy"]
@@ -159,7 +145,7 @@ def prepare_input(
             rescale_w = resize_w / camera_model.width
 
             assert (
-                abs(rescale_h - rescale_w) < 0.01
+                abs(rescale_h - rescale_w) < 0.02
             )  # only handle the case that height is downsampled by the same ratio, required by the ftheta camera model
             camera_model.rescale(rescale_h)
         else:
@@ -168,12 +154,7 @@ def prepare_input(
         camera_name_to_camera_model[camera_name] = camera_model
         camera_name_to_camera_poses[camera_name] = pose_all_frames
 
-    return (
-        camera_name_to_camera_poses,
-        render_frame_ids,
-        all_object_info,
-        camera_name_to_camera_model,
-    )
+    return camera_name_to_camera_poses, render_frame_ids, all_object_info, camera_name_to_camera_model
 
 
 def prepare_output(
@@ -283,19 +264,10 @@ def render_sample_hdmap(
 ):
     minimap_types = settings["MINIMAP_TYPES"]
 
-    (
-        camera_name_to_camera_poses,
-        render_frame_ids,
-        all_object_info,
-        camera_name_to_camera_model,
-    ) = prepare_input(
-        input_root,
-        clip_id,
-        settings,
-        camera_type,
-        post_training,
-        resize_resolution,
-        novel_pose_folder,
+    camera_name_to_camera_poses, render_frame_ids, all_object_info, camera_name_to_camera_model = (
+        prepare_input(
+            input_root, clip_id, settings, camera_type, post_training, resize_resolution, novel_pose_folder
+        )
     )
     minimap_wds_files = [
         os.path.join(input_root, f"3d_{minimap_type}", f"{clip_id}.tar") for minimap_type in minimap_types
@@ -305,21 +277,14 @@ def render_sample_hdmap(
         pose_all_frames = camera_name_to_camera_poses[camera_name]
 
         minimaps_projection_merged = np.zeros(
-            (len(render_frame_ids), camera_model.height, camera_model.width, 3),
-            dtype=np.uint8,
+            (len(render_frame_ids), camera_model.height, camera_model.width, 3), dtype=np.uint8
         )
         for minimap_wds_file in minimap_wds_files:
-            if not os.path.exists(minimap_wds_file):
-                print(f"Minimap file does not exist: {minimap_wds_file}")
-                continue
             minimap_data_wo_meta_info, minimap_name = simplify_minimap(minimap_wds_file)
 
             # all static labels
             minimap_projection = create_minimap_projection(
-                minimap_name,
-                minimap_data_wo_meta_info,
-                pose_all_frames[render_frame_ids],
-                camera_model,
+                minimap_name, minimap_data_wo_meta_info, pose_all_frames[render_frame_ids], camera_model
             )
             minimaps_projection_merged = np.maximum(minimaps_projection_merged, minimap_projection)
 
@@ -364,19 +329,10 @@ def render_sample_lidar(
     INPUT_LIDAR_FPS = settings["INPUT_LIDAR_FPS"]
 
     resize_w, resize_h = resize_resolution
-    (
-        camera_name_to_camera_poses,
-        render_frame_ids,
-        all_object_info,
-        camera_name_to_camera_model,
-    ) = prepare_input(
-        input_root,
-        clip_id,
-        settings,
-        camera_type,
-        post_training,
-        resize_resolution,
-        novel_pose_folder,
+    camera_name_to_camera_poses, render_frame_ids, all_object_info, camera_name_to_camera_model = (
+        prepare_input(
+            input_root, clip_id, settings, camera_type, post_training, resize_resolution, novel_pose_folder
+        )
     )
 
     frame_num = len(render_frame_ids)
@@ -395,14 +351,15 @@ def render_sample_lidar(
                 min(max(0, frame_idx + i * interp_rate), frame_num - 1)
                 for i in range(-accumulate_lidar_frames, accumulate_lidar_frames + 1)
             ]
-            low_fps_frame_indices, _ = get_low_fps_indices(accumulate_idx, step=interp_rate)
+            low_fps_frame_indices, _ = get_nearest_lidar_indices(accumulate_idx, step=interp_rate)
 
-            frame_ids = [
+            lidar_frame_ids = [
                 int(key.split(".")[0])
                 for key in lidar_data.keys()
                 if key.endswith(".lidar_raw.npz") and key.split(".")[0].isdigit()
             ]
-            max_lidar_idx = max(frame_ids)
+            valid_lidar_frame_ids = [x for x in lidar_frame_ids if x <= render_frame_ids[-1]]
+            max_lidar_idx = max(valid_lidar_frame_ids)
             low_fps_frame_indices = [min(max_lidar_idx, idx) for idx in low_fps_frame_indices]
 
             accumulated_points, original_bbox_dicts, moved_bbox_dicts = [], [], []
@@ -439,7 +396,13 @@ def render_sample_lidar(
             lengths_tensor = torch.tensor([t.shape[0] for t in accumulated_points_corrected], device="cuda")
             cat_points = torch.cat(accumulated_points_corrected, dim=0)
             w2cs = torch.inverse(torch.tensor(pose_all_frames[frame_idx])).unsqueeze(0).cuda()
-            intrinsics = torch.tensor(camera_model.intrinsics).unsqueeze(0).to(cat_points)
+            if camera_type == "ftheta":
+                cx_cy_w_h = camera_model.intrinsics[:4]
+                bw_poly = camera_model._bw_poly.coef
+                is_bw_poly = 1
+                intrinsics = torch.tensor([*cx_cy_w_h, *bw_poly, is_bw_poly]).unsqueeze(0).to(cat_points)
+            else:
+                intrinsics = torch.tensor(camera_model.intrinsics).unsqueeze(0).to(cat_points)
             depth, mask = forward_warp_multiframes_sparse_depth_only(
                 w2cs,
                 intrinsics,
@@ -491,19 +454,10 @@ def render_sample_rgb(
     This function is used to render / sample the RGB video for post-training use.
     """
     resize_w, resize_h = resize_resolution
-    (
-        camera_name_to_camera_poses,
-        render_frame_ids,
-        all_object_info,
-        camera_name_to_camera_model,
-    ) = prepare_input(
-        input_root,
-        clip_id,
-        settings,
-        camera_type,
-        post_training,
-        resize_resolution,
-        novel_pose_folder,
+    camera_name_to_camera_poses, render_frame_ids, all_object_info, camera_name_to_camera_model = (
+        prepare_input(
+            input_root, clip_id, settings, camera_type, post_training, resize_resolution, novel_pose_folder
+        )
     )
 
     for camera_name, camera_model in camera_name_to_camera_model.items():
@@ -541,26 +495,15 @@ def render_sample_rgb(
 
 
 @click.command()
-@click.option(
-    "--input_root",
-    "-i",
-    type=str,
-    help="the root folder of RDS-HQ or RDS-HQ format dataset",
-)
+@click.option("--input_root", "-i", type=str, help="the root folder of RDS-HQ or RDS-HQ format dataset")
 @click.option(
     "--clip_id_json",
     "-cj",
     type=str,
     default=None,
-    help="the path to the clip id json file. If provided, we just render the clips in the json file.",
+    help="exact clip id or path to the clip id json file. If provided, we just render the clips in the json file.",
 )
-@click.option(
-    "--output_root",
-    "-o",
-    type=str,
-    required=True,
-    help="the root folder for the output data",
-)
+@click.option("--output_root", "-o", type=str, required=True, help="the root folder for the output data")
 @click.option(
     "--dataset",
     "-d",
@@ -569,19 +512,11 @@ def render_sample_rgb(
     help="the dataset name, 'rds_hq', 'rds_hd_mv', 'waymo' or 'waymo_mv', see xxx.json in config folder",
 )
 @click.option(
-    "--camera_type",
-    "-c",
-    type=str,
-    default="ftheta",
-    help="the type of camera model, 'pinhole' or 'ftheta'",
+    "--camera_type", "-c", type=str, default="ftheta", help="the type of camera model, 'pinhole' or 'ftheta'"
 )
 @click.option("--skip", "-s", multiple=True, help="can be 'hdmap' or 'lidar'")
 @click.option(
-    "--post_training",
-    "-p",
-    type=bool,
-    default=False,
-    help="if True, output the RGB video for post-training",
+    "--post_training", "-p", type=bool, default=False, help="if True, output the RGB video for post-training"
 )
 @click.option(
     "--novel_pose_folder",
@@ -590,16 +525,7 @@ def render_sample_rgb(
     default=None,
     help="the folder name of the novel pose data. If provided, we will render the novel ego trajectory",
 )
-def main(
-    input_root,
-    clip_id_json,
-    output_root,
-    dataset,
-    camera_type,
-    skip,
-    post_training,
-    novel_pose_folder,
-):
+def main(input_root, clip_id_json, output_root, dataset, camera_type, skip, post_training, novel_pose_folder):
     if skip is not None:
         assert all(s in ["hdmap", "lidar"] for s in skip), "skip must be in ['hdmap', 'lidar']"
 
@@ -627,18 +553,18 @@ def main(
                 f"Original Resolution -> 1. {colored('Resize', 'yellow', attrs=['bold'])} to {colored(resize_resolution, 'yellow', attrs=['bold'])} for {camera_type} camera model."
             )
             print(
-                f"                    -> 2. {colored('Resize', 'yellow', attrs=['bold'])} to {colored(cosmos_resolution, 'yellow', attrs=['bold'])} for cosmos training."
+                f"                    -> 2. {colored('Resize', 'yellow', attrs=['bold'])} to {colored(cosmos_resolution, 'yellow', attrs=['bold'])} for cosmos model."
             )
         else:
             print(
-                f"Original Resolution -> 1. {colored('Resize', 'yellow', attrs=['bold'])} to {colored(cosmos_resolution, 'yellow', attrs=['bold'])} for {camera_type} camera model and cosmos training."
+                f"Original Resolution -> 1. {colored('Resize', 'yellow', attrs=['bold'])} to {colored(cosmos_resolution, 'yellow', attrs=['bold'])} for {camera_type} camera model and cosmos model."
             )
     else:
         print(
             f"Original Resolution -> 1. {colored('Resize', 'yellow', attrs=['bold'])} to {colored(resize_resolution, 'yellow', attrs=['bold'])} for {camera_type} camera model."
         )
         print(
-            f"                    -> 2. {colored('Center Crop', 'magenta', attrs=['bold'])} to {colored(cosmos_resolution, 'magenta', attrs=['bold'])} for cosmos training."
+            f"                    -> 2. {colored('Center Crop', 'magenta', attrs=['bold'])} to {colored(cosmos_resolution, 'magenta', attrs=['bold'])} for cosmos model."
         )
 
     # if novel_pose_folder is provided, we also change the output folder
@@ -646,13 +572,15 @@ def main(
         output_root = f"{output_root}_{novel_pose_folder}"
 
     # get all clip ids
-    if clip_id_json is not None:
-        clip_list = json.load(open(clip_id_json))
-    else:
+    if clip_id_json is None:
         input_root_p = Path(input_root)
         pose_folder = "pose" if novel_pose_folder is None else novel_pose_folder
         clip_list = (input_root_p / pose_folder).rglob("*.tar")
         clip_list = [c.stem for c in clip_list]
+    elif clip_id_json.endswith(".json"):
+        clip_list = json.load(open(clip_id_json))
+    else:
+        clip_list = [clip_id_json]
 
     # shuffle the clip list
     np.random.seed(0)

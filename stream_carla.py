@@ -74,6 +74,213 @@ def is_actor_visible(
     return actor_distance < visible_distance_threshold
 
 
+def lateral_shift(transform: carla.Transform, shift: float) -> carla.Location:
+    transform.rotation.yaw += 90
+    return transform.location + shift * transform.get_forward_vector()
+
+
+def check_is_boundary(waypoint: carla.Waypoint, sign: int) -> bool:
+    if sign > 0:  # right side
+        right_point: carla.Waypoint | None = waypoint.get_right_lane()
+        if (right_point is None and waypoint.is_junction) or (
+            right_point is not None and right_point.lane_type != carla.LaneType.Driving
+        ):
+            return True
+    elif sign < 0:  # left side
+        left_point: carla.Waypoint | None = waypoint.get_left_lane()
+        if left_point is not None and left_point.lane_type != carla.LaneType.Driving:
+            return True
+    return False
+
+
+def location_to_list(location: carla.Location) -> list[float]:
+    """Flip the y-axis to match the coordinate system of the dataset."""
+    return [location.x, -location.y, location.z]
+
+
+def get_single_side_points(
+    waypoints: list[carla.Waypoint], sign: int = 1
+) -> tuple[list[list[list[float]]], list[list[list[float]]]]:
+    all_lanes_waypoints = []
+    all_boundaries_waypoints = []
+    temp_waypoints = []
+    current_lane_marking = carla.LaneMarkingType.NONE
+    for sample in waypoints:
+        lane_marking = sample.left_lane_marking if sign < 0 else sample.right_lane_marking
+        if lane_marking is None:
+            continue
+        marking_type = lane_marking.type
+
+        if len(temp_waypoints) > 0 and current_lane_marking != marking_type:
+            current_lane_marking = marking_type
+
+            is_boundary = check_is_boundary(temp_waypoints[(len(temp_waypoints) - 1) // 2], sign)
+            processed_waypoints = [
+                location_to_list(lateral_shift(sample.transform, sign * 0.5 * sample.lane_width))
+                for sample in temp_waypoints[:-1]
+            ]
+            if is_boundary:
+                all_boundaries_waypoints.append(processed_waypoints)
+            else:
+                all_lanes_waypoints.append(processed_waypoints)
+
+            temp_waypoints = temp_waypoints[-1:]
+        else:
+            temp_waypoints.append(sample)
+
+    is_boundary = check_is_boundary(temp_waypoints[(len(temp_waypoints) - 1) // 2], sign)
+    processed_waypoints = [
+        location_to_list(lateral_shift(sample.transform, sign * 0.5 * sample.lane_width))
+        for sample in temp_waypoints
+    ]
+    if is_boundary:
+        all_boundaries_waypoints.append(processed_waypoints)
+    else:
+        all_lanes_waypoints.append(processed_waypoints)
+    return all_lanes_waypoints, all_boundaries_waypoints
+
+
+def save_map_info(carla_manager: CarlaManager, target_out_dir: pathlib.Path, precision: float = 1.0):
+    topology = carla_manager.world_manager.map.get_topology()
+    topology = sorted([x[0] for x in topology], key=lambda x: x.transform.location.z)
+    set_waypoints: list[list[carla.Waypoint]] = []
+    for waypoint in topology:
+        waypoints = [waypoint]
+
+        next_waypoint = waypoint.next(precision)
+        if len(next_waypoint) > 0:
+            next_waypoint = next_waypoint[0]
+            while next_waypoint.road_id == waypoint.road_id:
+                waypoints.append(next_waypoint)
+                next_waypoint = next_waypoint.next(precision)
+                if len(next_waypoint) > 0:
+                    next_waypoint = next_waypoint[0]
+                else:
+                    break
+        set_waypoints.append(waypoints)
+
+    boundaries = {"labels": []}
+    lanelines = {"labels": []}
+    for waypoints in set_waypoints:
+        left_lanes_waypoints_list, left_boundaries_waypoints_list = get_single_side_points(waypoints, sign=-1)
+        for left_waypoints in left_lanes_waypoints_list:
+            lanelines["labels"].append(
+                {
+                    "labelData": {
+                        "shape3d": {"polyline3d": {"vertices": left_waypoints}},
+                    }
+                }
+            )
+
+        for left_waypoints in left_boundaries_waypoints_list:
+            boundaries["labels"].append(
+                {
+                    "labelData": {
+                        "shape3d": {"polyline3d": {"vertices": left_waypoints}},
+                    }
+                }
+            )
+        right_lanes_waypoints_list, right_boundaries_waypoints_list = get_single_side_points(
+            waypoints, sign=1
+        )
+        for right_waypoints in right_lanes_waypoints_list:
+            lanelines["labels"].append(
+                {
+                    "labelData": {
+                        "shape3d": {"polyline3d": {"vertices": right_waypoints}},
+                    }
+                }
+            )
+        for right_waypoints in right_boundaries_waypoints_list:
+            boundaries["labels"].append(
+                {
+                    "labelData": {
+                        "shape3d": {"polyline3d": {"vertices": right_waypoints}},
+                    }
+                }
+            )
+
+    with open(target_out_dir / "hdmap" / "road_boundaries.json", "w") as fp:
+        json.dump(boundaries, fp)
+    with open(target_out_dir / "hdmap" / "lanelines.json", "w") as fp:
+        json.dump(lanelines, fp)
+
+    # ── save poles
+    poles = {"labels": []}  # polylines
+    pole_bbs = carla_manager.world_manager.world.get_level_bbs(carla.CityObjectLabel.Poles)
+    for pole_bb in pole_bbs:
+        center = pole_bb.location
+        extent = pole_bb.extent
+        verts = [
+            [center.x, -center.y, center.z - extent.z],
+            [center.x, -center.y, center.z + extent.z],
+        ]
+        poles["labels"].append(
+            {
+                "labelData": {
+                    "shape3d": {"polyline3d": {"vertices": verts}},
+                }
+            }
+        )
+    with open(target_out_dir / "hdmap" / "poles.json", "w") as fp:
+        json.dump(poles, fp)
+
+    # ── save traffic lights
+    traffic_lights = {"labels": []}  # cuboids
+    traffic_light_bbs = carla_manager.world_manager.world.get_level_bbs(carla.CityObjectLabel.TrafficLight)
+    for traffic_light_bb in traffic_light_bbs:
+        center = traffic_light_bb.location
+        extent = traffic_light_bb.extent
+        verts = [
+            [center.x - extent.x, -(center.y - extent.y), center.z + extent.z],
+            [center.x + extent.x, -(center.y - extent.y), center.z + extent.z],
+            [center.x + extent.x, -(center.y + extent.y), center.z + extent.z],
+            [center.x - extent.x, -(center.y + extent.y), center.z + extent.z],
+            [center.x - extent.x, -(center.y - extent.y), center.z - extent.z],
+            [center.x + extent.x, -(center.y - extent.y), center.z - extent.z],
+            [center.x + extent.x, -(center.y + extent.y), center.z - extent.z],
+            [center.x - extent.x, -(center.y + extent.y), center.z - extent.z],
+        ]
+        traffic_lights["labels"].append(
+            {
+                "labelData": {
+                    "shape3d": {"boxes": {"vertices": verts}},
+                }
+            }
+        )
+    with open(target_out_dir / "hdmap" / "traffic_lights.json", "w") as fp:
+        json.dump(traffic_lights, fp)
+
+    # ── save traffic signs
+    traffic_signs = {"labels": []}  # cuboids
+    traffic_sign_bbs = carla_manager.world_manager.world.get_level_bbs(carla.CityObjectLabel.TrafficSigns)
+    for traffic_sign_bb in traffic_sign_bbs:
+        center = traffic_sign_bb.location
+        extent = traffic_sign_bb.extent
+        verts = [
+            [center.x - extent.x, -(center.y - extent.y), center.z + extent.z],
+            [center.x + extent.x, -(center.y - extent.y), center.z + extent.z],
+            [center.x + extent.x, -(center.y + extent.y), center.z + extent.z],
+            [center.x - extent.x, -(center.y + extent.y), center.z + extent.z],
+            [center.x - extent.x, -(center.y - extent.y), center.z - extent.z],
+            [center.x + extent.x, -(center.y - extent.y), center.z - extent.z],
+            [center.x + extent.x, -(center.y + extent.y), center.z - extent.z],
+            [center.x - extent.x, -(center.y + extent.y), center.z - extent.z],
+        ]
+        traffic_signs["labels"].append(
+            {
+                "labelData": {
+                    "shape3d": {"boxes": {"vertices": verts}},
+                }
+            }
+        )
+    with open(target_out_dir / "hdmap" / "traffic_signs.json", "w") as fp:
+        json.dump(traffic_signs, fp)
+
+    # crosswalks will be processed with opendrive due to the issue of
+    #  https://github.com/carla-simulator/carla/issues/5790
+
+
 def record_clip(
     carla_manager: CarlaManager,
     target_out_dir: pathlib.Path,
@@ -136,6 +343,7 @@ def record_clip(
     xodr_path = target_out_dir / "hdmap" / "static_map.xodr"
     with open(xodr_path, "w", encoding="utf-8") as fp:
         fp.write(world_manager.map.to_opendrive())
+    save_map_info(carla_manager, target_out_dir)
 
     # ── calibration: LiDAR extrinsic ──────────────────────────────────────────
     with open(target_out_dir / "calibration" / "lidar.json", "w") as fp:

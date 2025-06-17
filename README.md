@@ -90,6 +90,21 @@ This will create a directory with the following structure:
 └── 3d_lanes/             # Contains 3D lane data
 ```
 
+To visualize the converted data:
+
+```bash
+python toolkit/visualize_rds_hq.py \
+  -i {DIR_FOR_SAVING_DATA} \
+  -c {CLIP_ID} \
+  -d carla
+
+# for example
+python toolkit/visualize_rds_hq.py \
+  -i outputs \
+  -c 0000 \
+  -d carla
+```
+
 ## 🎥 Rendering from RDS-HQ
 
 >[!TIP]
@@ -101,14 +116,14 @@ To render the HD-Map and Lidar from the RDS-HQ format, run the `render_rds_hq.py
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 
 python toolkit/render_rds_hq.py \
-  -d waymo \
+  -d carla \
   -i {DIR_WITH_RDS_HQ_DATA} \
   -o {DIR_FOR_SAVING_RENDERED_DATA} \
   -c ftheta  # recommend
 
 # for example
 python toolkit/render_rds_hq.py \
-  -d waymo -i outputs \
+  -d carla -i outputs \
   -o demo_render -c ftheta # recommend
 ```
 

@@ -8,7 +8,8 @@
         "traffic_lights",
         "traffic_signs",
         "poles",
-        "crosswalks"
+        "crosswalks",
+        "wait_lines"
     ],
     "CAMERAS_TO_RDS_HQ": {
         "front": "camera_front_wide_120fov"

@@ -133,11 +133,16 @@ def convert_carla_hdmap(
     with open(record_root / "hdmap" / "traffic_signs.json", "r") as fp:
         traffic_signs_sample["traffic_signs.json"] = json.load(fp)
     write_to_tar(traffic_signs_sample, out_dir / "3d_traffic_signs" / f"{clip_id}.tar")
-    poles_sample = {"__key__": clip_id}
 
+    poles_sample = {"__key__": clip_id}
     with open(record_root / "hdmap" / "poles.json", "r") as fp:
         poles_sample["poles.json"] = json.load(fp)
     write_to_tar(poles_sample, out_dir / "3d_poles" / f"{clip_id}.tar")
+
+    wait_lines_sample = {"__key__": clip_id}
+    with open(record_root / "hdmap" / "wait_lines.json", "r") as fp:
+        wait_lines_sample["wait_lines.json"] = json.load(fp)
+    write_to_tar(wait_lines_sample, out_dir / "3d_wait_lines" / f"{clip_id}.tar")
 
 
 def convert_carla_pose(

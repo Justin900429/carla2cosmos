@@ -38,7 +38,7 @@ class WorldManager:
         self._agents = agents
 
     @property
-    def actors(self) -> list[carla.Actor]:
+    def actors(self) -> carla.ActorList:
         return self.world.get_actors()
 
     @property

@@ -140,6 +140,35 @@ def get_single_side_points(
     return all_lanes_waypoints, all_boundaries_waypoints
 
 
+def to_left(waypoint: carla.Waypoint) -> carla.Waypoint:
+    init_sign = waypoint.lane_id
+
+    use_method = "get_left_lane" if init_sign * waypoint.lane_id > 0 else "get_right_lane"
+    while getattr(waypoint, use_method)() is not None:
+        next_waypoint = getattr(waypoint, use_method)()
+        if next_waypoint is None:
+            break
+        if next_waypoint.lane_type != carla.LaneType.Driving:
+            break
+        waypoint = next_waypoint
+        use_method = "get_left_lane" if init_sign * waypoint.lane_id > 0 else "get_right_lane"
+    return waypoint
+
+
+def to_right(waypoint: carla.Waypoint) -> carla.Waypoint:
+    init_sign = waypoint.lane_id
+    use_method = "get_right_lane" if init_sign * waypoint.lane_id > 0 else "get_left_lane"
+    while getattr(waypoint, use_method)() is not None:
+        next_waypoint = getattr(waypoint, use_method)()
+        if next_waypoint is None:
+            break
+        if next_waypoint.lane_type != carla.LaneType.Driving:
+            break
+        waypoint = next_waypoint
+        use_method = "get_right_lane" if init_sign * waypoint.lane_id > 0 else "get_left_lane"
+    return waypoint
+
+
 def save_map_info(carla_manager: CarlaManager, target_out_dir: pathlib.Path, precision: float = 1.0):
     topology = carla_manager.world_manager.map.get_topology()
     topology = sorted([x[0] for x in topology], key=lambda x: x.transform.location.z)
@@ -224,6 +253,48 @@ def save_map_info(carla_manager: CarlaManager, target_out_dir: pathlib.Path, pre
         )
     with open(target_out_dir / "hdmap" / "poles.json", "w") as fp:
         json.dump(poles, fp)
+
+    # ── save wait lines
+    wait_lines = {"labels": []}
+    for traffic_light in carla_manager.world_manager.actors.filter("traffic.traffic_light"):
+        wait_points = traffic_light.get_stop_waypoints()
+        if len(wait_points) == 0:
+            continue
+        wait_point = wait_points[0]
+
+        right_point, left_point = wait_point, wait_point
+        while right_point.get_right_lane() is not None:
+            right_right_point = right_point.get_right_lane()
+            if right_right_point.lane_type != carla.LaneType.Driving:
+                break
+            right_point = right_right_point
+        while left_point.get_left_lane() is not None:
+            left_left_point = left_point.get_left_lane()
+            if (
+                left_left_point.lane_type != carla.LaneType.Driving
+                or left_left_point.lane_id * wait_point.lane_id < 0
+            ):
+                break
+            left_point = left_left_point
+        right_point = lateral_shift(right_point.transform, 0.5 * right_point.lane_width)
+        left_point = lateral_shift(left_point.transform, -0.5 * left_point.lane_width)
+
+        wait_lines["labels"].append(
+            {
+                "labelData": {
+                    "shape3d": {
+                        "polyline3d": {
+                            "vertices": [
+                                location_to_list(left_point),
+                                location_to_list(right_point),
+                            ]
+                        }
+                    },
+                }
+            }
+        )
+    with open(target_out_dir / "hdmap" / "wait_lines.json", "w") as fp:
+        json.dump(wait_lines, fp)
 
     # ── save traffic lights
     traffic_lights = {"labels": []}  # cuboids
